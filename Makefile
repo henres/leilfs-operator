@@ -1,0 +1,297 @@
+
+# Image URL to use all building/pushing image targets
+IMG ?= controller:latest
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.29.0
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
+
+# CONTAINER_TOOL defines the container tool to be used for building images.
+# Be aware that the target commands are only tested with Docker which is
+# scaffolded by default. However, you might want to replace it to use other
+# tools. (i.e. podman)
+CONTAINER_TOOL ?= docker
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
+.PHONY: all
+all: build
+
+##@ General
+
+# The help target prints out all targets with their descriptions organized
+# beneath their categories. The categories are represented by '##@' and the
+# target descriptions by '##'. The awk command is responsible for reading the
+# entire set of makefiles included in this invocation, looking for lines of the
+# file as xyz: ## something, and then pretty-format the target and help. Then,
+# if there's a line with ##@ something, that gets pretty-printed as a category.
+# More info on the usage of ANSI control characters for terminal formatting:
+# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
+# More info on the awk command:
+# http://linuxcommand.org/lc3_adv_awk.php
+
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Development
+
+.PHONY: manifests
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: generate
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+
+.PHONY: fmt
+fmt: ## Run go fmt against code.
+	go fmt ./...
+
+.PHONY: vet
+vet: ## Run go vet against code.
+	go vet ./...
+
+.PHONY: test
+test: manifests generate fmt vet envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+
+# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
+.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
+test-e2e:
+	go test ./test/e2e/ -v -ginkgo.v
+
+.PHONY: lint
+lint: golangci-lint ## Run golangci-lint linter & yamllint
+	$(GOLANGCI_LINT) run
+
+.PHONY: lint-fix
+lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
+	$(GOLANGCI_LINT) run --fix
+
+##@ Build
+
+.PHONY: build
+build: manifests generate fmt vet ## Build manager binary.
+	go build -o bin/manager cmd/main.go
+
+.PHONY: run
+run: manifests generate fmt vet ## Run a controller from your host.
+	go run ./cmd/main.go
+
+# If you wish to build the manager image targeting other platforms you can use the --platform flag.
+# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
+# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+.PHONY: docker-build
+docker-build: ## Build docker image with the manager.
+	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: docker-push
+docker-push: ## Push docker image with the manager.
+	$(CONTAINER_TOOL) push ${IMG}
+
+# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
+# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
+# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
+# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
+# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
+PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+.PHONY: docker-buildx
+docker-buildx: ## Build and push docker image for the manager for cross-platform support
+	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	- $(CONTAINER_TOOL) buildx create --name project-v3-builder
+	$(CONTAINER_TOOL) buildx use project-v3-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm project-v3-builder
+	rm Dockerfile.cross
+
+.PHONY: build-installer
+build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
+	mkdir -p dist
+	@if [ -d "config/crd" ]; then \
+		$(KUSTOMIZE) build config/crd > dist/install.yaml; \
+	fi
+	echo "---" >> dist/install.yaml  # Add a document separator before appending
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default >> dist/install.yaml
+
+##@ Kind
+
+.PHONY: kind-prepare-dirs
+kind-prepare-dirs: ## Create host directories bind-mounted as /mnt/hdd001 and /mnt/hdd002 in each Kind worker node.
+	mkdir -p \
+	  $(KIND_DATA_DIR)/worker-master/hdd001 \
+	  $(KIND_DATA_DIR)/worker-master/hdd002 \
+	  $(KIND_DATA_DIR)/worker-chunk-1/hdd001 \
+	  $(KIND_DATA_DIR)/worker-chunk-1/hdd002 \
+	  $(KIND_DATA_DIR)/worker-chunk-2/hdd001 \
+	  $(KIND_DATA_DIR)/worker-chunk-2/hdd002
+
+.PHONY: kind-create
+kind-create: kind-prepare-dirs ## Create a Kind cluster using hack/kind-config.yaml.
+	$(KIND) create cluster --name $(KIND_CLUSTER_NAME) --config $(KIND_CONFIG)
+
+.PHONY: kind-delete
+kind-delete: ## Delete the Kind cluster.
+	$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
+
+.PHONY: kind-load
+kind-load: docker-build ## Build the manager image and load it into the Kind cluster.
+	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
+
+.PHONY: kind-install
+kind-install: manifests kustomize ## Install CRDs into the Kind cluster.
+	$(KUSTOMIZE) build config/crd | $(KIND_KUBECTL) apply -f -
+
+.PHONY: kind-deploy
+kind-deploy: kind-load kind-install ## Load image and deploy the operator to the Kind cluster.
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
+	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) apply -f -
+
+.PHONY: kind-undeploy
+kind-undeploy: kustomize ## Remove the operator from the Kind cluster.
+	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) delete --ignore-not-found=true -f -
+
+.PHONY: saunafs-images
+saunafs-images: ## Clone leil-io/saunafs-container and build saunafs-master/chunkserver/client/metalogger images.
+	bash hack/build-saunafs-images.sh
+
+.PHONY: kind-load-saunafs
+kind-load-saunafs: ## Load the locally built SaunaFS images into the Kind cluster.
+	@for img in $(SAUNAFS_IMAGES); do \
+	  echo "Loading $${img}:latest into Kind..."; \
+	  $(KIND) load docker-image $${img}:latest --name $(KIND_CLUSTER_NAME); \
+	done
+
+.PHONY: kind-test
+kind-test: kind-create saunafs-images kind-load-saunafs kind-deploy ## Build SaunaFS images, create Kind cluster and deploy the operator end-to-end.
+
+.PHONY: kind-sample
+kind-sample: ## Apply the SaunaFSCluster sample CR to the Kind cluster.
+	$(KIND_KUBECTL) apply -f config/samples/saunafs_v1alpha1_saunafscluster.yaml
+
+.PHONY: kind-reset
+kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy operator and sample.
+	@echo "==> Deleting Kind cluster (if exists)..."
+	-$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
+	@echo "==> Wiping data directories..."
+	rm -rf $(KIND_DATA_DIR)
+	@echo "==> Recreating cluster and host dirs..."
+	$(MAKE) kind-create
+	@echo "==> Building SaunaFS images..."
+	$(MAKE) saunafs-images
+	@echo "==> Building controller image..."
+	$(MAKE) docker-build
+	@echo "==> Loading all images into Kind..."
+	$(MAKE) kind-load-saunafs
+	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Deploying operator (CRDs + controller)..."
+	$(MAKE) kind-install
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
+	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) apply -f -
+	@echo "==> Waiting for controller to be ready..."
+	$(KIND_KUBECTL) rollout status deployment/saunafs-operator-controller-manager \
+	    -n saunafs-operator-system --timeout=120s
+	@echo "==> Deploying sample SaunaFSCluster CR..."
+	$(MAKE) kind-sample
+	@echo "==> Done. Cluster ready."
+
+##@ Deployment
+
+ifndef ignore-not-found
+  ignore-not-found = false
+endif
+
+.PHONY: install
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
+
+.PHONY: uninstall
+uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy
+deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+
+.PHONY: undeploy
+undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ Dependencies
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool Binaries
+KUBECTL ?= kubectl
+KIND    ?= kind
+KUSTOMIZE ?= $(LOCALBIN)/kustomize-$(KUSTOMIZE_VERSION)
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
+ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+
+## Tool Versions
+KUSTOMIZE_VERSION ?= v5.3.0
+CONTROLLER_TOOLS_VERSION ?= v0.14.0
+ENVTEST_VERSION ?= latest
+GOLANGCI_LINT_VERSION ?= v1.54.2
+
+## Kind
+KIND_CLUSTER_NAME ?= saunafs-operator
+KIND_CONFIG       ?= hack/kind-config.yaml
+KIND_IMG          ?= $(IMG)
+# Root directory on the real host that is bind-mounted into Kind nodes as /mnt/hdd00X
+KIND_DATA_DIR     ?= /tmp/saunafs-kind
+
+## SaunaFS images (built locally from leil-io/saunafs-container)
+SAUNAFS_IMAGES ?= saunafs-master saunafs-chunkserver saunafs-client saunafs-metalogger saunafs-cgiserver izdock/nfs-ganesha
+# kubectl shorthand pre-configured for the Kind cluster context
+KIND_KUBECTL   = $(KUBECTL) --context kind-$(KIND_CLUSTER_NAME)
+
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+$(KUSTOMIZE): $(LOCALBIN)
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+$(CONTROLLER_GEN): $(LOCALBIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: envtest
+envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
+$(ENVTEST): $(LOCALBIN)
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT): $(LOCALBIN)
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary (ideally with version)
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f $(1) ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
+}
+endef

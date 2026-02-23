@@ -1,0 +1,29 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: saunafs-operator
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      saunafs-role: master
+    extraMounts:
+      - hostPath: /tmp/saunafs-kind/worker-master/hdd001
+        containerPath: /mnt/hdd001
+      - hostPath: /tmp/saunafs-kind/worker-master/hdd002
+        containerPath: /mnt/hdd002
+  - role: worker
+    labels:
+      saunafs-role: chunk
+    extraMounts:
+      - hostPath: /tmp/saunafs-kind/worker-chunk-1/hdd001
+        containerPath: /mnt/hdd001
+      - hostPath: /tmp/saunafs-kind/worker-chunk-1/hdd002
+        containerPath: /mnt/hdd002
+  - role: worker
+    labels:
+      saunafs-role: chunk
+    extraMounts:
+      - hostPath: /tmp/saunafs-kind/worker-chunk-2/hdd001
+        containerPath: /mnt/hdd001
+      - hostPath: /tmp/saunafs-kind/worker-chunk-2/hdd002
+        containerPath: /mnt/hdd002

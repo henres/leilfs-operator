@@ -1,0 +1,57 @@
+apiVersion: saunafs.saunafs-operator.io/v1alpha1
+kind: SaunaFSCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: saunafscluster
+    app.kubernetes.io/instance: saunafscluster-sample
+    app.kubernetes.io/part-of: saunafs-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: saunafs-operator
+  name: saunafscluster-sample
+spec:
+  master:
+    image: saunafs-master:latest
+    nodeSelector:
+      saunafs-role: master
+    ports:
+      - name: client
+        containerPort: 9421
+      - name: cs
+        containerPort: 9420
+      - name: admin
+        containerPort: 9419
+  chunk:
+    image: saunafs-chunkserver:latest
+    ports:
+      - name: data
+        containerPort: 9422
+    servers:
+      - name: chunk-1
+        nodeName: saunafs-operator-worker2
+        mountPaths:
+          - path: /mnt/hdd001
+            hostPath: /mnt/hdd001
+          - path: /mnt/hdd002
+            hostPath: /mnt/hdd002
+      - name: chunk-2
+        nodeName: saunafs-operator-worker3
+        mountPaths:
+          - path: /mnt/hdd001
+            hostPath: /mnt/hdd001
+          - path: /mnt/hdd002
+            hostPath: /mnt/hdd002
+  csi:
+    enabled: true
+    driverName: saunafs.csi.saunafs-operator.io
+    image: saunafs-client:latest
+  interface:
+    enabled: true
+    image: saunafs-cgiserver:latest
+    serviceType: NodePort
+  expose:
+    enabled: true
+  nfs:
+    enabled: true
+    image: izdock/nfs-ganesha:latest
+    exportPath: /
+    squash: No_Root_Squash

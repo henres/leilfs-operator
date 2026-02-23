@@ -605,9 +605,9 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	if ganeshaImage == "" {
 		ganeshaImage = "izdock/nfs-ganesha:latest"
 	}
-	// saunafs-client image: reuse the same image as chunk servers if set,
-	// otherwise fall back to saunafs-client:latest.
-	clientImage := cluster.Spec.Chunk.Image
+	// saunafs-client image: always use saunafs-client:latest unless the NFS
+	// spec overrides it. The chunk image is a chunkserver, not a FUSE client.
+	clientImage := cluster.Spec.NFS.ClientImage
 	if clientImage == "" {
 		clientImage = "saunafs-client:latest"
 	}
@@ -676,12 +676,16 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 							// Keep the container alive after mounting.
 							// saunafs-mount forks into the background then the
 							// sidecar sleeps indefinitely to hold the process.
+							// sfsmount -f keeps the process in the foreground
+							// (no need for sleep infinity). Mountpoint is the
+							// first positional argument followed by options.
 							Command: []string{
-								"sh", "-c",
-								fmt.Sprintf(
-									"saunafs-mount -H %s -P 9421 /exports -o big_writes,nosuid,nodev && sleep infinity",
-									masterHost,
-								),
+								"sfsmount",
+								"-f",
+								"/exports",
+								"-H", masterHost,
+								"-P", "9421",
+								"-o", "nosuid,nodev",
 							},
 							SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
 							VolumeMounts: []corev1.VolumeMount{
@@ -717,8 +721,7 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "exports", MountPath: "/exports", MountPropagation: &hostToContainer},
-								{Name: "run", MountPath: "/run"},
-							},
+								{Name: "run", MountPath: "/run"}, {Name: "varrun-ganesha", MountPath: "/var/run/ganesha"}},
 						},
 					},
 					Volumes: []corev1.Volume{
@@ -730,6 +733,11 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 						},
 						{
 							Name:         "run",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+						{
+							// ganesha.nfsd writes its PID file here.
+							Name:         "varrun-ganesha",
 							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 					},

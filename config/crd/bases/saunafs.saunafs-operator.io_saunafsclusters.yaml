@@ -604,6 +604,11 @@ spec:
                   filesystem over standard NFS (port 2049). Any NFS client can then mount
                   the filesystem without installing saunafs-client.
                 properties:
+                  clientImage:
+                    description: |-
+                      ClientImage is the saunafs-client image used as a FUSE sidecar to mount
+                      the filesystem before Ganesha exports it. Defaults to saunafs-client:latest.
+                    type: string
                   enabled:
                     description: Enabled controls whether the NFS-Ganesha Deployment
                       and Service are created.

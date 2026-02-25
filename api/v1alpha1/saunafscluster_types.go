@@ -136,11 +136,8 @@ type NFSSpec struct {
 	// Enabled controls whether the NFS-Ganesha Deployment and Service are created.
 	Enabled *bool `json:"enabled,omitempty"`
 	// Image is the NFS-Ganesha container image to use.
-	// It must include the SaunaFS FSAL (e.g. saunafs-nfs:latest).
+	// Must include the SaunaFS FSAL (saunafs-nfs-ganesha package).
 	Image string `json:"image,omitempty"`
-	// ClientImage is the saunafs-client image used as a FUSE sidecar to mount
-	// the filesystem before Ganesha exports it. Defaults to saunafs-client:latest.
-	ClientImage string `json:"clientImage,omitempty"`
 	// Replicas is the number of NFS gateway pods (default 1).
 	Replicas *int32 `json:"replicas,omitempty"`
 	// NodePort is the NodePort assigned to NFS port 2049.

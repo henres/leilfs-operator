@@ -592,6 +592,7 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 		for _, obj := range []client.Object{
 			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
 			&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name + "-ganesha-conf", Namespace: cluster.Namespace}},
 		} {
 			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
 				return err
@@ -603,13 +604,7 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	// ── defaults ─────────────────────────────────────────────────────────────
 	ganeshaImage := nfs.Image
 	if ganeshaImage == "" {
-		ganeshaImage = "izdock/nfs-ganesha:latest"
-	}
-	// saunafs-client image: always use saunafs-client:latest unless the NFS
-	// spec overrides it. The chunk image is a chunkserver, not a FUSE client.
-	clientImage := cluster.Spec.NFS.ClientImage
-	if clientImage == "" {
-		clientImage = "saunafs-client:latest"
+		ganeshaImage = "nfs-ganesha:latest"
 	}
 	var replicas int32 = 1
 	if nfs.Replicas != nil {
@@ -629,9 +624,58 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	}
 	masterHost := fmt.Sprintf("%s-master.%s.svc.cluster.local", cluster.Name, cluster.Namespace)
 
+	// ── ConfigMap: ganesha.conf ──────────────────────────────────────────────
+	// Format follows the official SaunaFS documentation exactly.
+	// Ganesha connects directly to the SaunaFS master via the SaunaFS FSAL —
+	// no local FUSE mount needed.
+	ganeshaConf := fmt.Sprintf(`
+EXPORT
+{
+    Export_Id            = 1;
+    Path                 = "%s";
+    Pseudo               = "/";
+    Access_Type          = RW;
+    Squash               = %s;
+    Attr_Expiration_Time = 0;
+
+    FSAL {
+        Name                     = SaunaFS;
+        hostname                 = "%s";
+        port                     = "9421";
+        io_retries               = 5;
+        cache_expiration_time_ms = 2500;
+    }
+
+    Protocols = 3, 4;
+}
+`, exportPath, squash, masterHost)
+
+	ganeshaConfCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name + "-ganesha-conf",
+			Namespace: cluster.Namespace,
+		},
+		Data: map[string]string{"ganesha.conf": ganeshaConf},
+	}
+	if err := ctrl.SetControllerReference(cluster, ganeshaConfCM, r.Scheme); err != nil {
+		return err
+	}
+	existingCM := &corev1.ConfigMap{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(ganeshaConfCM), existingCM); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := r.Create(ctx, ganeshaConfCM); err != nil {
+			return err
+		}
+	} else {
+		existingCM.Data = ganeshaConfCM.Data
+		if err := r.Update(ctx, existingCM); err != nil {
+			return err
+		}
+	}
+
 	privileged := true
-	bidir := corev1.MountPropagationBidirectional
-	hostToContainer := corev1.MountPropagationHostToContainer
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":     "saunafs-nfs",
@@ -649,69 +693,20 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 				Spec: corev1.PodSpec{
 					NodeSelector: nfs.NodeSelector,
 					Tolerations:  nfs.Tolerations,
-					// FUSE mounts need to cross container boundaries:
-					// saunafs-client mounts /exports (Bidirectional) so the
-					// kernel propagates it to the host and back into the
-					// nfs-ganesha container (HostToContainer).
-					InitContainers: []corev1.Container{
-						{
-							// Ensures /exports exists before saunafs-mount runs.
-							Name:            "init-exports",
-							Image:           "busybox:latest",
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							Command:         []string{"sh", "-c", "mkdir -p /exports"},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "exports", MountPath: "/exports", MountPropagation: &bidir},
-							},
-							SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
-						},
-					},
 					Containers: []corev1.Container{
 						{
-							// saunafs-client mounts the SaunaFS filesystem via
-							// FUSE into the shared /exports volume.
-							Name:            "saunafs-client",
-							Image:           clientImage,
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							// Keep the container alive after mounting.
-							// saunafs-mount forks into the background then the
-							// sidecar sleeps indefinitely to hold the process.
-							// sfsmount -f keeps the process in the foreground
-							// (no need for sleep infinity). Mountpoint is the
-							// first positional argument followed by options.
-							Command: []string{
-								"sfsmount",
-								"-f",
-								"/exports",
-								"-H", masterHost,
-								"-P", "9421",
-								"-o", "nosuid,nodev",
-							},
-							SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "exports", MountPath: "/exports", MountPropagation: &bidir},
-							},
-						},
-						{
-							// NFS-Ganesha re-exports /exports over NFS using
-							// the VFS FSAL (no SaunaFS-specific build needed).
-							// Configuration is done entirely via env vars as
-							// documented by izdock/nfs-ganesha.
+							// Single container: ganesha.nfsd with the SaunaFS
+							// FSAL connects directly to the master — no FUSE
+							// sidecar needed.
 							Name:            "nfs-ganesha",
 							Image:           ganeshaImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Resources:       nfs.Resources,
-							Env: []corev1.EnvVar{
-								{Name: "EXPORT_PATH", Value: "/exports"},
-								{Name: "PSEUDO_PATH", Value: "/"},
-								{Name: "SQUASH_MODE", Value: squash},
-								{Name: "PROTOCOLS", Value: "3,4"},
-								{Name: "TRANSPORTS", Value: "TCP"},
-								{Name: "ACCESS_TYPE", Value: "RW"},
-								// Allow all private ranges by default; expose
-								// can still be restricted at the firewall level.
-								{Name: "CLIENT_LIST", Value: "0.0.0.0/0"},
-								{Name: "LOG_LEVEL", Value: "WARN"},
+							// Start rpcbind for NFSv3 portmapper, then run
+							// ganesha.nfsd in the foreground pointing at the
+							// ConfigMap-provided config.
+							Command: []string{"sh", "-c",
+								"rpcbind || true; ganesha.nfsd -F -f /etc/ganesha/ganesha.conf -N NIV_WARN -L /dev/stdout",
 							},
 							SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
 							Ports: []corev1.ContainerPort{
@@ -720,17 +715,16 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 								{Name: "rpcbind-udp", ContainerPort: 111, Protocol: corev1.ProtocolUDP},
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: "exports", MountPath: "/exports", MountPropagation: &hostToContainer},
-								{Name: "run", MountPath: "/run"}, {Name: "varrun-ganesha", MountPath: "/var/run/ganesha"}},
+								{Name: "run", MountPath: "/run"},
+								{Name: "varrun-ganesha", MountPath: "/var/run/ganesha"},
+								// Override /etc/ganesha/ganesha.conf with our
+								// ConfigMap. Since we own the Dockerfile there
+								// is no entrypoint script that would overwrite it.
+								{Name: "ganesha-conf", MountPath: "/etc/ganesha/ganesha.conf", SubPath: "ganesha.conf"},
+							},
 						},
 					},
 					Volumes: []corev1.Volume{
-						{
-							// Shared FUSE mount point between saunafs-client
-							// and nfs-ganesha.
-							Name:         "exports",
-							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-						},
 						{
 							Name:         "run",
 							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
@@ -739,6 +733,18 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 							// ganesha.nfsd writes its PID file here.
 							Name:         "varrun-ganesha",
 							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+						{
+							// ganesha.conf with SaunaFS FSAL settings,
+							// generated from the SaunaFSCluster spec.
+							Name: "ganesha-conf",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: name + "-ganesha-conf",
+									},
+								},
+							},
 						},
 					},
 				},

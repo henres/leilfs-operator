@@ -173,6 +173,14 @@ kind-load-saunafs: ## Load the locally built SaunaFS images into the Kind cluste
 	  $(KIND) load docker-image $${img}:latest --name $(KIND_CLUSTER_NAME); \
 	done
 
+.PHONY: nfs-ganesha-build
+nfs-ganesha-build: ## Build the custom NFS-Ganesha image from docker/nfs-ganesha.Dockerfile.
+	docker build -t nfs-ganesha:latest -f docker/nfs-ganesha.Dockerfile docker/
+
+.PHONY: kind-load-nfs-ganesha
+kind-load-nfs-ganesha: nfs-ganesha-build ## Build and load the NFS-Ganesha image into Kind.
+	$(KIND) load docker-image nfs-ganesha:latest --name $(KIND_CLUSTER_NAME)
+
 .PHONY: kind-test
 kind-test: kind-create saunafs-images kind-load-saunafs kind-deploy ## Build SaunaFS images, create Kind cluster and deploy the operator end-to-end.
 
@@ -258,7 +266,7 @@ KIND_IMG          ?= $(IMG)
 KIND_DATA_DIR     ?= /tmp/saunafs-kind
 
 ## SaunaFS images (built locally from leil-io/saunafs-container)
-SAUNAFS_IMAGES ?= saunafs-master saunafs-chunkserver saunafs-client saunafs-metalogger saunafs-cgiserver izdock/nfs-ganesha
+SAUNAFS_IMAGES ?= saunafs-master saunafs-chunkserver saunafs-client saunafs-metalogger saunafs-cgiserver nfs-ganesha
 # kubectl shorthand pre-configured for the Kind cluster context
 KIND_KUBECTL   = $(KUBECTL) --context kind-$(KIND_CLUSTER_NAME)
 

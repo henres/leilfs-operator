@@ -52,6 +52,6 @@ spec:
     enabled: true
   nfs:
     enabled: true
-    image: izdock/nfs-ganesha:latest
+    image: nfs-ganesha:latest
     exportPath: /
     squash: No_Root_Squash

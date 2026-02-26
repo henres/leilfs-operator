@@ -1,0 +1,16 @@
+apiVersion: v2
+name: saunafs-operator
+description: Kubernetes operator for managing SaunaFS distributed filesystem clusters
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - saunafs
+  - distributed-filesystem
+  - storage
+  - operator
+home: https://github.com/henres/saunafs-operator
+sources:
+  - https://github.com/henres/saunafs-operator
+maintainers:
+  - name: Henri Dauvigny

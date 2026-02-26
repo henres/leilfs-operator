@@ -1,0 +1,30 @@
+SaunaFS Operator has been deployed successfully!
+
+Operator namespace : {{ .Release.Namespace }}
+Operator deployment: {{ include "saunafs-operator.fullname" . }}-controller-manager
+
+The CRD "saunafsclusters.saunafs.saunafs-operator.io" is now registered.
+You can create a SaunaFSCluster resource to deploy a distributed SaunaFS cluster:
+
+  kubectl apply -f - <<EOF
+  apiVersion: saunafs.saunafs-operator.io/v1alpha1
+  kind: SaunaFSCluster
+  metadata:
+    name: my-cluster
+    namespace: {{ .Release.Namespace }}
+  spec:
+    master:
+      image: saunafs-master:latest
+    chunk:
+      image: saunafs-chunkserver:latest
+      servers:
+        - name: chunk-0
+          nodeName: <your-node-name>
+          mountPaths:
+            - path: /mnt/hdd001
+              hostPath: /data/saunafs
+  EOF
+
+Check the operator logs:
+  kubectl logs -n {{ .Release.Namespace }} \
+    deploy/{{ include "saunafs-operator.fullname" . }}-controller-manager -c manager -f

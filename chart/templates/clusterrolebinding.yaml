@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "saunafs-operator.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "saunafs-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "saunafs-operator.fullname" . }}-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "saunafs-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

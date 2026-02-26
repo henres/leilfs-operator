@@ -1,0 +1,74 @@
+# Default values for saunafs-operator.
+
+# -- Number of replicas for the operator deployment
+replicaCount: 1
+
+image:
+  # -- Operator container image repository
+  repository: ghcr.io/henres/saunafs-operator
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to Chart appVersion)
+  tag: ""
+
+# -- Image pull secrets
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount
+  create: true
+  # -- Annotations added to the ServiceAccount
+  annotations: {}
+  # -- Override the ServiceAccount name (defaults to full release name)
+  name: ""
+
+# -- Annotations added to the operator Pod
+podAnnotations: {}
+
+# -- Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+
+# -- Container-level security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - "ALL"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Enable leader election (recommended for production with multiple replicas)
+leaderElect: true
+
+# -- Address for the metrics endpoint
+metricsBindAddress: ":8080"
+
+# -- Address for the health probe endpoint
+healthProbeBindAddress: ":8081"
+
+# -- Serve metrics over HTTPS
+metricsSecure: false
+
+# -- Enable HTTP/2 for metrics and webhook servers
+enableHTTP2: false
+
+# -- Node selector for the operator pod
+nodeSelector: {}
+
+# -- Tolerations for the operator pod
+tolerations: []
+
+# -- Affinity rules for the operator pod
+affinity: {}

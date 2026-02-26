@@ -1,0 +1,32 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "saunafs-operator.fullname" . }}-manager-role
+  labels:
+    {{- include "saunafs-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - persistentvolumeclaims
+      - services
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources:
+      - daemonsets
+      - deployments
+      - statefulsets
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [saunafs.saunafs-operator.io]
+    resources:
+      - saunafsclusters
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [saunafs.saunafs-operator.io]
+    resources:
+      - saunafsclusters/finalizers
+    verbs: [update]
+  - apiGroups: [saunafs.saunafs-operator.io]
+    resources:
+      - saunafsclusters/status
+    verbs: [get, patch, update]

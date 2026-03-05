@@ -1,0 +1,24 @@
+machine:
+  disks:
+    - device: /dev/sda
+      partitions:
+        - mountpoint: /var/mnt/sda
+    - device: /dev/sdb
+      partitions:
+        - mountpoint: /var/mnt/sdb
+  kubelet:
+    extraMounts:
+      - destination: /var/mnt/sda
+        type: bind
+        source: /var/mnt/sda
+        options:
+          - bind
+          - rshared
+          - rw
+      - destination: /var/mnt/sdb
+        type: bind
+        source: /var/mnt/sdb
+        options:
+          - bind
+          - rshared
+          - rw

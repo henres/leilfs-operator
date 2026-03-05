@@ -23,9 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // SaunaFSClusterSpec defines the desired state of SaunaFSCluster
 type SaunaFSClusterSpec struct {
 	// Master configures the master daemonset.
@@ -45,10 +42,36 @@ type SaunaFSClusterSpec struct {
 	NFS NFSSpec `json:"nfs,omitempty"`
 }
 
-// SaunaFSClusterStatus defines the observed state of SaunaFSCluster
+// Condition type constants for SaunaFSCluster.
+const (
+	// ConditionReady indicates that all cluster components have been
+	// successfully reconciled and are expected to be running.
+	ConditionReady = "Ready"
+
+	// ReasonReconciling is used while a reconciliation loop is in progress.
+	ReasonReconciling = "Reconciling"
+	// ReasonReconcileError is used when a reconciliation step returns an error.
+	ReasonReconcileError = "ReconcileError"
+	// ReasonReady is used when all components have been reconciled without error.
+	ReasonReady = "Ready"
+)
+
+// SaunaFSClusterStatus defines the observed state of SaunaFSCluster.
 type SaunaFSClusterStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions holds the latest observed conditions of the cluster.
+	// The "Ready" condition indicates whether all components have been
+	// successfully reconciled.
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+	// ReadyChunkServers is the number of chunk-server StatefulSets whose
+	// desired replicas are all ready.
+	ReadyChunkServers int32 `json:"readyChunkServers,omitempty"`
+	// TotalChunkServers is the total number of chunk-server StatefulSets
+	// configured in spec.chunk.servers.
+	TotalChunkServers int32 `json:"totalChunkServers,omitempty"`
 }
 
 // MasterSpec defines the master component settings.
@@ -184,6 +207,10 @@ type NamedPort struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether all cluster components are reconciled"
+//+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].reason",description="Reason for the current Ready status"
+//+kubebuilder:printcolumn:name="ChunkServers",type="integer",JSONPath=".status.readyChunkServers",description="Ready chunk server count"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // SaunaFSCluster is the Schema for the saunafsclusters API
 type SaunaFSCluster struct {

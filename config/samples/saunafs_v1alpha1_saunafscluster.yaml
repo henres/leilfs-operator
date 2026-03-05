@@ -20,36 +20,53 @@ spec:
         containerPort: 9420
       - name: admin
         containerPort: 9419
+  # Chunk servers — 1 chunkserver per disk, 2 disks per node, 3 nodes = 6 chunkservers.
+  # This layout enables ec(4,2) erasure coding (50% overhead, tolerates 2 simultaneous failures).
+  # Node names follow the kind convention for cluster name "saunafs-operator".
   chunk:
     image: saunafs-chunkserver:latest
     ports:
       - name: data
         containerPort: 9422
     servers:
-      - name: chunk-1
+      - name: worker1-hdd001
+        nodeName: saunafs-operator-worker
+        mountPaths:
+          - path: /mnt/hdd001
+            hostPath: /mnt/hdd001
+      - name: worker1-hdd002
+        nodeName: saunafs-operator-worker
+        mountPaths:
+          - path: /mnt/hdd002
+            hostPath: /mnt/hdd002
+      - name: worker2-hdd001
         nodeName: saunafs-operator-worker2
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
+      - name: worker2-hdd002
+        nodeName: saunafs-operator-worker2
+        mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
-      - name: chunk-2
+      - name: worker3-hdd001
         nodeName: saunafs-operator-worker3
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
+      - name: worker3-hdd002
+        nodeName: saunafs-operator-worker3
+        mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
   csi:
-    enabled: true
+    enabled: false
     driverName: saunafs.csi.saunafs-operator.io
     image: saunafs-client:latest
   interface:
     enabled: true
     image: saunafs-cgiserver:latest
     serviceType: NodePort
-  expose:
-    enabled: true
   nfs:
     enabled: true
     image: nfs-ganesha:latest

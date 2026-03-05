@@ -23,6 +23,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -56,26 +57,77 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	logger.Info("Reconciling SaunaFSCluster", "name", cluster.Name)
 
-	if err := r.reconcileMasterDaemonSet(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile master daemonset: %w", err)
+	// Run all sub-reconcilers; on first error record a Failed condition.
+	var reconcileErr error
+	steps := []struct {
+		name string
+		fn   func(context.Context, *saunafsv1alpha1.SaunaFSCluster) error
+	}{
+		{"master daemonset", r.reconcileMasterDaemonSet},
+		{"master service", r.reconcileMasterService},
+		{"chunk servers", r.reconcileChunkServers},
+		{"interface", r.reconcileInterface},
+		{"expose service", r.reconcileExposeService},
+		{"nfs", r.reconcileNFS},
 	}
-	if err := r.reconcileMasterService(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile master service: %w", err)
-	}
-	if err := r.reconcileChunkServers(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile chunk servers: %w", err)
-	}
-	if err := r.reconcileInterface(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile interface: %w", err)
-	}
-	if err := r.reconcileExposeService(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile expose service: %w", err)
-	}
-	if err := r.reconcileNFS(ctx, cluster); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile nfs: %w", err)
+	for _, step := range steps {
+		if err := step.fn(ctx, cluster); err != nil {
+			reconcileErr = fmt.Errorf("reconcile %s: %w", step.name, err)
+			break
+		}
 	}
 
-	return ctrl.Result{}, nil
+	// Refresh cluster object before patching status to avoid conflicts.
+	patch := client.MergeFrom(cluster.DeepCopy())
+
+	cluster.Status.TotalChunkServers = int32(len(cluster.Spec.Chunk.Servers))
+
+	if reconcileErr != nil {
+		apimeta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+			Type:               saunafsv1alpha1.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             saunafsv1alpha1.ReasonReconcileError,
+			Message:            reconcileErr.Error(),
+			ObservedGeneration: cluster.Generation,
+		})
+	} else {
+		ready := r.countReadyChunkServers(ctx, cluster)
+		cluster.Status.ReadyChunkServers = ready
+
+		msg := fmt.Sprintf("All components reconciled (%d/%d chunk servers ready)",
+			ready, cluster.Status.TotalChunkServers)
+		apimeta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+			Type:               saunafsv1alpha1.ConditionReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             saunafsv1alpha1.ReasonReady,
+			Message:            msg,
+			ObservedGeneration: cluster.Generation,
+		})
+	}
+
+	if err := r.Status().Patch(ctx, cluster, patch); err != nil {
+		logger.Error(err, "Failed to update SaunaFSCluster status")
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, reconcileErr
+}
+
+// countReadyChunkServers returns the number of chunk-server StatefulSets
+// whose desired replicas are all ready.
+func (r *SaunaFSClusterReconciler) countReadyChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+	var ready int32
+	for _, srv := range cluster.Spec.Chunk.Servers {
+		name := fmt.Sprintf("%s-chunk-%s", cluster.Name, srv.Name)
+		sts := &appsv1.StatefulSet{}
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, sts); err != nil {
+			continue
+		}
+		if sts.Status.ReadyReplicas >= *sts.Spec.Replicas {
+			ready++
+		}
+	}
+	return ready
 }
 
 // ── Master DaemonSet ────────────────────────────────────────────────────────

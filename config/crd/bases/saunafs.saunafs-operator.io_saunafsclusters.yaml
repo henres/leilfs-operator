@@ -14,7 +14,23 @@ spec:
     singular: saunafscluster
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Whether all cluster components are reconciled
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - description: Reason for the current Ready status
+      jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - description: Ready chunk server count
+      jsonPath: .status.readyChunkServers
+      name: ChunkServers
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: SaunaFSCluster is the Schema for the saunafsclusters API
@@ -604,11 +620,6 @@ spec:
                   filesystem over standard NFS (port 2049). Any NFS client can then mount
                   the filesystem without installing saunafs-client.
                 properties:
-                  clientImage:
-                    description: |-
-                      ClientImage is the saunafs-client image used as a FUSE sidecar to mount
-                      the filesystem before Ganesha exports it. Defaults to saunafs-client:latest.
-                    type: string
                   enabled:
                     description: Enabled controls whether the NFS-Ganesha Deployment
                       and Service are created.
@@ -620,7 +631,7 @@ spec:
                   image:
                     description: |-
                       Image is the NFS-Ganesha container image to use.
-                      It must include the SaunaFS FSAL (e.g. saunafs-nfs:latest).
+                      Must include the SaunaFS FSAL (saunafs-nfs-ganesha package).
                     type: string
                   nodePort:
                     description: |-
@@ -745,7 +756,96 @@ spec:
                 type: object
             type: object
           status:
-            description: SaunaFSClusterStatus defines the observed state of SaunaFSCluster
+            description: SaunaFSClusterStatus defines the observed state of SaunaFSCluster.
+            properties:
+              conditions:
+                description: |-
+                  Conditions holds the latest observed conditions of the cluster.
+                  The "Ready" condition indicates whether all components have been
+                  successfully reconciled.
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource.\n---\nThis struct is intended for
+                    direct use as an array at the field path .status.conditions.  For
+                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
+                    observations of a foo's current state.\n\t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
+                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
+                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
+                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
+                    \   // other fields\n\t}"
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        type of condition in CamelCase or in foo.example.com/CamelCase.
+                        ---
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
+                        useful (see .node.status.conditions), the ability to deconflict is important.
+                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              readyChunkServers:
+                description: |-
+                  ReadyChunkServers is the number of chunk-server StatefulSets whose
+                  desired replicas are all ready.
+                format: int32
+                type: integer
+              totalChunkServers:
+                description: |-
+                  TotalChunkServers is the total number of chunk-server StatefulSets
+                  configured in spec.chunk.servers.
+                format: int32
+                type: integer
             type: object
         type: object
     served: true

@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= ghcr.io/henres/saunafs-operator/saunafs-operator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.29.0
 
@@ -213,6 +213,27 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy opera
 	@echo "==> Deploying sample SaunaFSCluster CR..."
 	$(MAKE) kind-sample
 	@echo "==> Done. Cluster ready."
+
+
+.PHONY: kind-build-and-deployment
+kind-build-and-deployment: ## FULL RESET: delete cluster+data, rebuild everything, deploy operator and sample.
+	@echo "==> Building SaunaFS images..."
+	$(MAKE) saunafs-images
+	@echo "==> Building controller image..."
+	$(MAKE) docker-build
+	@echo "==> Loading all images into Kind..."
+	$(MAKE) kind-load-saunafs
+	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Deploying operator (CRDs + controller)..."
+	$(MAKE) kind-install
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
+	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) apply -f -
+	@echo "==> Waiting for controller to be ready..."
+	$(KIND_KUBECTL) rollout status deployment/saunafs-operator-controller-manager \
+	    -n saunafs-operator-system --timeout=120s
+	@echo "==> Deploying sample SaunaFSCluster CR..."
+	$(MAKE) kind-sample
+	@echo "==> Deployment Done. App ready."
 
 ##@ Deployment
 

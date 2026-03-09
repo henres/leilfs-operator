@@ -29,6 +29,13 @@ type SaunaFSClusterSpec struct {
 	Master MasterSpec `json:"master,omitempty"`
 	// Chunk holds defaults shared by all chunk servers and the per-server list.
 	Chunk ChunkSpec `json:"chunk,omitempty"`
+	// Goals defines custom storage goals written to sfsgoals.cfg on the master.
+	// Each entry produces one line in the file; the master reads it at startup.
+	// If omitted, SaunaFS uses its built-in defaults (goals 1–9).
+	// Goals with IDs 1–9 override the built-in ones; IDs 10–20 are purely
+	// custom. The first entry flagged with Default=true is applied as the
+	// cluster-wide default goal via the master configuration.
+	Goals []GoalSpec `json:"goals,omitempty"`
 	// CSI controls the optional CSI driver deployment.
 	CSI CSISpec `json:"csi,omitempty"`
 	// WebUI controls the optional CGI web interface (saunafs-cgiserver).
@@ -72,6 +79,60 @@ type SaunaFSClusterStatus struct {
 	// TotalChunkServers is the total number of chunk-server StatefulSets
 	// configured in spec.chunk.servers.
 	TotalChunkServers int32 `json:"totalChunkServers,omitempty"`
+}
+
+// GoalSpec defines one SaunaFS storage goal written to sfsgoals.cfg.
+// Exactly one of Replication or EC must be set.
+//
+// Built-in SaunaFS goals use IDs 1–9; custom goals should use 10–20.
+//
+// Examples:
+//
+//	{ id: 2, name: "two_copies",  replication: 2 }
+//	{ id: 10, name: "ec_4_2", ec: { dataParts: 4, parityParts: 2 }, default: true }
+type GoalSpec struct {
+	// ID is the numeric identifier for this goal (1–20).
+	// SaunaFS built-in goals occupy IDs 1–9.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	ID int32 `json:"id"`
+	// Name is the human-readable label used in sfsgoals.cfg.
+	// Must contain only alphanumeric characters, hyphens, or underscores.
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9_-]+$`
+	Name string `json:"name"`
+	// Replication is the number of copies to maintain.
+	// Mutually exclusive with EC.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	Replication *int32 `json:"replication,omitempty"`
+	// EC defines an erasure-coding goal.
+	// Mutually exclusive with Replication.
+	EC *ECSpec `json:"ec,omitempty"`
+	// Default marks this goal as the cluster-wide default.
+	// At most one goal should set Default=true; the operator writes
+	// SFSMASTER_DEFAULT_GOAL=<Name> in sfsmaster.cfg.
+	Default bool `json:"default,omitempty"`
+}
+
+// ECSpec parameterises an erasure-coding goal of the form ec(dataParts, parityParts).
+//
+// Requirements:
+//   - dataParts + parityParts chunk servers must be available.
+//   - The cluster tolerates up to parityParts simultaneous failures without
+//     data loss (provided a sufficient number of chunk servers exist).
+//
+// Common setups:
+//
+//	ec(4,2): 6 CS required, 50 % overhead, tolerates 2 failures.
+//	ec(8,2): 10 CS required, 25 % overhead, tolerates 2 failures.
+//	ec(4,1): 5 CS required, 25 % overhead, tolerates 1 failure.
+type ECSpec struct {
+	// DataParts is the number of data fragments (k in ec(k,m)).
+	// +kubebuilder:validation:Minimum=2
+	DataParts int32 `json:"dataParts"`
+	// ParityParts is the number of parity/redundancy fragments (m in ec(k,m)).
+	// +kubebuilder:validation:Minimum=1
+	ParityParts int32 `json:"parityParts"`
 }
 
 // MasterSpec defines the master component settings.

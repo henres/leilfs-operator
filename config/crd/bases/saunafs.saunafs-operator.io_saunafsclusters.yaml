@@ -371,6 +371,76 @@ spec:
                       SaunaFS clients can connect to the master and mount the filesystem.
                     type: boolean
                 type: object
+              goals:
+                description: |-
+                  Goals defines custom storage goals written to sfsgoals.cfg on the master.
+                  Each entry produces one line in the file; the master reads it at startup.
+                  If omitted, SaunaFS uses its built-in defaults (goals 1–9).
+                  Goals with IDs 1–9 override the built-in ones; IDs 10–20 are purely
+                  custom. The first entry flagged with Default=true is applied as the
+                  cluster-wide default goal via the master configuration.
+                items:
+                  description: "GoalSpec defines one SaunaFS storage goal written
+                    to sfsgoals.cfg.\nExactly one of Replication or EC must be set.\n\n\nBuilt-in
+                    SaunaFS goals use IDs 1–9; custom goals should use 10–20.\n\n\nExamples:\n\n\n\t{
+                    id: 2, name: \"two_copies\",  replication: 2 }\n\t{ id: 10, name:
+                    \"ec_4_2\", ec: { dataParts: 4, parityParts: 2 }, default: true
+                    }"
+                  properties:
+                    default:
+                      description: |-
+                        Default marks this goal as the cluster-wide default.
+                        At most one goal should set Default=true; the operator writes
+                        SFSMASTER_DEFAULT_GOAL=<Name> in sfsmaster.cfg.
+                      type: boolean
+                    ec:
+                      description: |-
+                        EC defines an erasure-coding goal.
+                        Mutually exclusive with Replication.
+                      properties:
+                        dataParts:
+                          description: DataParts is the number of data fragments (k
+                            in ec(k,m)).
+                          format: int32
+                          minimum: 2
+                          type: integer
+                        parityParts:
+                          description: ParityParts is the number of parity/redundancy
+                            fragments (m in ec(k,m)).
+                          format: int32
+                          minimum: 1
+                          type: integer
+                      required:
+                      - dataParts
+                      - parityParts
+                      type: object
+                    id:
+                      description: |-
+                        ID is the numeric identifier for this goal (1–20).
+                        SaunaFS built-in goals occupy IDs 1–9.
+                      format: int32
+                      maximum: 20
+                      minimum: 1
+                      type: integer
+                    name:
+                      description: |-
+                        Name is the human-readable label used in sfsgoals.cfg.
+                        Must contain only alphanumeric characters, hyphens, or underscores.
+                      pattern: ^[a-zA-Z0-9_-]+$
+                      type: string
+                    replication:
+                      description: |-
+                        Replication is the number of copies to maintain.
+                        Mutually exclusive with EC.
+                      format: int32
+                      maximum: 20
+                      minimum: 1
+                      type: integer
+                  required:
+                  - id
+                  - name
+                  type: object
+                type: array
               interface:
                 description: WebUI controls the optional CGI web interface (saunafs-cgiserver).
                 properties:

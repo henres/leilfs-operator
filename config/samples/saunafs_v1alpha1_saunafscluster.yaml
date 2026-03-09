@@ -63,6 +63,13 @@ spec:
     enabled: false
     driverName: saunafs.csi.saunafs-operator.io
     image: saunafs-client:latest
+  goals:
+    - id: 10
+      name: ec_4_2
+      ec:
+        dataParts: 4
+        parityParts: 2
+      default: true
   interface:
     enabled: true
     image: saunafs-cgiserver:latest

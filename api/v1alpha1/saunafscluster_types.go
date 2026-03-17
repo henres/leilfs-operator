@@ -135,6 +135,20 @@ type ECSpec struct {
 	ParityParts int32 `json:"parityParts"`
 }
 
+// MasterStorageSpec configures the PersistentVolumeClaim used to persist
+// the SaunaFS master metadata directory (/var/lib/saunafs).
+// If omitted, the operator creates a 1Gi PVC using the cluster's default
+// StorageClass (typically "standard" in Kind / local-path-provisioner).
+type MasterStorageSpec struct {
+	// StorageClassName is the name of the StorageClass to use for the metadata PVC.
+	// Defaults to "" (cluster default StorageClass).
+	StorageClassName string `json:"storageClassName,omitempty"`
+	// Size is the storage capacity requested for the metadata PVC.
+	// Defaults to "1Gi".
+	// +kubebuilder:default="1Gi"
+	Size resource.Quantity `json:"size,omitempty"`
+}
+
 // MasterSpec defines the master component settings.
 type MasterSpec struct {
 	Image        string                      `json:"image,omitempty"`
@@ -143,6 +157,9 @@ type MasterSpec struct {
 	Resources    corev1.ResourceRequirements `json:"resources,omitempty"`
 	ServiceType  corev1.ServiceType          `json:"serviceType,omitempty"`
 	Ports        []NamedPort                 `json:"ports,omitempty"`
+	// MetadataStorage configures the PVC used to persist /var/lib/saunafs.
+	// If omitted, a default 1Gi PVC is created automatically.
+	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
 }
 
 // ChunkSpec holds defaults shared by all chunk servers and the individual server list.

@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -65,6 +66,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		fn   func(context.Context, *saunafsv1alpha1.SaunaFSCluster) error
 	}{
 		{"goals configmap", r.reconcileGoalsConfigMap},
+		{"master metadata pvc", r.reconcileMasterPVC},
 		{"master daemonset", r.reconcileMasterDaemonSet},
 		{"master service", r.reconcileMasterService},
 		{"chunk servers", r.reconcileChunkServers},
@@ -225,6 +227,58 @@ func buildGoalsConfig(goals []saunafsv1alpha1.GoalSpec) (goalsFile, masterSnippe
 	return sb.String(), masterSnippet
 }
 
+// reconcileMasterPVC ensures the PersistentVolumeClaim that backs the master
+// metadata directory (/var/lib/saunafs) exists and is owned by the cluster.
+// The PVC is intentionally not deleted when the cluster is deleted so that
+// metadata survives an undeploy/deploy cycle (it must be cleaned up manually
+// or via a separate garbage-collection policy).
+func (r *SaunaFSClusterReconciler) reconcileMasterPVC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+	pvcName := fmt.Sprintf("%s-master-metadata", cluster.Name)
+
+	// Determine storage size and class from spec (or use defaults).
+	storageSize := resource.MustParse("1Gi")
+	var storageClassName *string
+	if ms := cluster.Spec.Master.MetadataStorage; ms != nil {
+		if !ms.Size.IsZero() {
+			storageSize = ms.Size
+		}
+		if ms.StorageClassName != "" {
+			sc := ms.StorageClassName
+			storageClassName = &sc
+		}
+	}
+
+	desired := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: cluster.Namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			},
+			StorageClassName: storageClassName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: storageSize,
+				},
+			},
+		},
+	}
+	if err := ctrl.SetControllerReference(cluster, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: cluster.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	// PVC already exists — do not update (resizing requires special handling
+	// and storage class changes are not supported in-place).
+	return err
+}
+
 func (r *SaunaFSClusterReconciler) reconcileMasterDaemonSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
 	name := fmt.Sprintf("%s-master", cluster.Name)
 	image := cluster.Spec.Master.Image
@@ -234,10 +288,16 @@ func (r *SaunaFSClusterReconciler) reconcileMasterDaemonSet(ctx context.Context,
 
 	ports := masterContainerPorts(cluster)
 
-	// emptyDir for /var/lib/saunafs (metadata, shared with init-metadata).
+	// PVC-backed volume for /var/lib/saunafs (metadata, shared with init-metadata).
+	// The PVC is reconciled by reconcileMasterPVC before this function runs.
+	pvcName := fmt.Sprintf("%s-master-metadata", cluster.Name)
 	dataVolume := corev1.Volume{
-		Name:         "saunafs-data",
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		Name: "saunafs-data",
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+			},
+		},
 	}
 	dataMount := corev1.VolumeMount{
 		Name:      "saunafs-data",

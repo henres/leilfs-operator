@@ -67,7 +67,8 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}{
 		{"goals configmap", r.reconcileGoalsConfigMap},
 		{"master metadata pvc", r.reconcileMasterPVC},
-		{"master daemonset", r.reconcileMasterDaemonSet},
+		{"migrate master daemonset", r.migrateMasterDaemonSet},
+		{"master deployment", r.reconcileMasterDeployment},
 		{"master service", r.reconcileMasterService},
 		{"chunk servers", r.reconcileChunkServers},
 		{"interface", r.reconcileInterface},
@@ -134,16 +135,35 @@ func (r *SaunaFSClusterReconciler) countReadyChunkServers(ctx context.Context, c
 	return ready
 }
 
-// ── Master DaemonSet ────────────────────────────────────────────────────────
+// ── Master migration: DaemonSet → Deployment ────────────────────────────────
+
+// migrateMasterDaemonSet deletes the legacy master DaemonSet if it still
+// exists. This is a one-time migration step: new clusters never create the
+// DaemonSet; existing clusters need the old object removed so that the new
+// Deployment can take over without name conflicts.
+func (r *SaunaFSClusterReconciler) migrateMasterDaemonSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+	name := fmt.Sprintf("%s-master", cluster.Name)
+	ds := &appsv1.DaemonSet{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, ds)
+	if errors.IsNotFound(err) {
+		return nil // already gone
+	}
+	if err != nil {
+		return err
+	}
+	return r.Delete(ctx, ds)
+}
+
+// ── Master Deployment ────────────────────────────────────────────────────────
 
 // ── Goals ConfigMap ──────────────────────────────────────────────────────────
 
 // reconcileGoalsConfigMap creates or updates a ConfigMap that holds the
-// generated sfsgoals.cfg file. The file is mounted into the master DaemonSet
+// generated sfsgoals.cfg file. The file is mounted into the master Deployment
 // as a SubPath volume so only /etc/saunafs/sfsgoals.cfg is overridden.
 //
 // The ConfigMap carries two keys:
-//   - sfsgoals.cfg  — mounted automatically by the master DaemonSet.
+//   - sfsgoals.cfg  — mounted automatically by the master Deployment.
 //   - sfsmaster-default-goal.txt — informational snippet showing the
 //     SFSMASTER_DEFAULT_GOAL line to add to sfsmaster.cfg when Default=true
 //     is set on a goal. Not mounted automatically (requires a custom image or
@@ -288,7 +308,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterPVC(ctx context.Context, clust
 	return err
 }
 
-func (r *SaunaFSClusterReconciler) reconcileMasterDaemonSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *SaunaFSClusterReconciler) reconcileMasterDeployment(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
 	name := fmt.Sprintf("%s-master", cluster.Name)
 	image := cluster.Spec.Master.Image
 	if image == "" {
@@ -357,12 +377,14 @@ func (r *SaunaFSClusterReconciler) reconcileMasterDaemonSet(ctx context.Context,
 		initConfigCmd += " && cp /etc/saunafs-goals/sfsgoals.cfg /etc/saunafs/sfsgoals.cfg"
 	}
 
-	desired := &appsv1.DaemonSet{
+	replicas := int32(1)
+	desired := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: cluster.Namespace,
 		},
-		Spec: appsv1.DaemonSetSpec{
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app.kubernetes.io/name":     "saunafs-master",
@@ -424,7 +446,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterDaemonSet(ctx context.Context,
 	if err := ctrl.SetControllerReference(cluster, desired, r.Scheme); err != nil {
 		return err
 	}
-	return r.createOrUpdateDaemonSet(ctx, desired)
+	return r.createOrUpdateDeployment(ctx, desired)
 }
 
 func masterContainerPorts(cluster *saunafsv1alpha1.SaunaFSCluster) []corev1.ContainerPort {
@@ -1110,19 +1132,6 @@ func chunkDNSPolicy(cluster *saunafsv1alpha1.SaunaFSCluster) corev1.DNSPolicy {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-func (r *SaunaFSClusterReconciler) createOrUpdateDaemonSet(ctx context.Context, desired *appsv1.DaemonSet) error {
-	existing := &appsv1.DaemonSet{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-	existing.Spec = desired.Spec
-	return r.Update(ctx, existing)
-}
-
 func (r *SaunaFSClusterReconciler) createOrUpdateStatefulSet(ctx context.Context, desired *appsv1.StatefulSet) error {
 	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
@@ -1155,7 +1164,6 @@ func (r *SaunaFSClusterReconciler) createOrUpdateDeployment(ctx context.Context,
 func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&saunafsv1alpha1.SaunaFSCluster{}).
-		Owns(&appsv1.DaemonSet{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).

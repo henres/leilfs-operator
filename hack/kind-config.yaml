@@ -7,8 +7,6 @@ nodes:
   # worker — hosts the SaunaFS master (via nodeSelector saunafs-role=master)
   # and two chunk servers (one per disk).
   - role: worker
-    labels:
-      saunafs-role: master
     extraMounts:
       - hostPath: /tmp/saunafs-kind/worker1/hdd001
         containerPath: /mnt/hdd001

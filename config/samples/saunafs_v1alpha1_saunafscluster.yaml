@@ -79,3 +79,5 @@ spec:
     image: nfs-ganesha:latest
     exportPath: /
     squash: No_Root_Squash
+    serviceType: NodePort
+    nodePort: 32049

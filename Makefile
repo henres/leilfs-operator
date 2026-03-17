@@ -69,6 +69,19 @@ test: manifests generate fmt vet envtest ## Run tests.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
+# PLUGIN_BIN     - path to the plugin binary (default: bin/kubectl-saunafs)
+# PLUGIN_CLUSTER - SaunaFSCluster name to test against (default: saunafscluster-sample)
+# PLUGIN_NS      - namespace (default: default)
+# Requires a running Kind cluster: make kind-reset
+PLUGIN_BIN     ?= bin/kubectl-saunafs
+PLUGIN_CLUSTER ?= saunafscluster-sample
+PLUGIN_NS      ?= default
+
+.PHONY: test-plugin
+test-plugin: build-plugin ## Run kubectl-saunafs plugin smoke tests against a live cluster.
+	PLUGIN_BIN=$(PLUGIN_BIN) PLUGIN_CLUSTER=$(PLUGIN_CLUSTER) PLUGIN_NS=$(PLUGIN_NS) \
+	  go test ./test/e2e/ -v --ginkgo.v --ginkgo.focus "kubectl-saunafs" --ginkgo.timeout 10m
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
 	$(GOLANGCI_LINT) run
@@ -82,6 +95,16 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+
+.PHONY: build-plugin
+build-plugin: fmt vet ## Build the kubectl-saunafs plugin binary.
+	go build -o bin/kubectl-saunafs ./cmd/kubectl-saunafs/
+
+.PHONY: install-plugin
+install-plugin: build-plugin ## Install the kubectl-saunafs plugin into GOBIN (or ~/go/bin).
+	cp bin/kubectl-saunafs $(GOBIN)/kubectl-saunafs
+	@echo "Plugin installed to $(GOBIN)/kubectl-saunafs"
+	@echo "Make sure $(GOBIN) is in your PATH, then use: kubectl saunafs --help"
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -192,8 +215,8 @@ kind-sample: ## Apply the SaunaFSCluster sample CR to the Kind cluster.
 kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy operator and sample.
 	@echo "==> Deleting Kind cluster (if exists)..."
 	-$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
-	@echo "==> Wiping data directories..."
-	rm -rf $(KIND_DATA_DIR)
+	@echo "==> Wiping data directories (sudo required for root-owned chunk files)..."
+	sudo rm -rf $(KIND_DATA_DIR)
 	@echo "==> Recreating cluster and host dirs..."
 	$(MAKE) kind-create
 	@echo "==> Building SaunaFS images..."
@@ -203,6 +226,9 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy opera
 	@echo "==> Loading all images into Kind..."
 	$(MAKE) kind-load-saunafs
 	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Pulling and loading kube-rbac-proxy..."
+	docker pull $(KUBE_RBAC_PROXY_IMG)
+	$(KIND) load docker-image $(KUBE_RBAC_PROXY_IMG) --name $(KIND_CLUSTER_NAME)
 	@echo "==> Deploying operator (CRDs + controller)..."
 	$(MAKE) kind-install
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
@@ -224,6 +250,9 @@ kind-build-and-deployment: ## FULL RESET: delete cluster+data, rebuild everythin
 	@echo "==> Loading all images into Kind..."
 	$(MAKE) kind-load-saunafs
 	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Pulling and loading kube-rbac-proxy..."
+	docker pull $(KUBE_RBAC_PROXY_IMG)
+	$(KIND) load docker-image $(KUBE_RBAC_PROXY_IMG) --name $(KIND_CLUSTER_NAME)
 	@echo "==> Deploying operator (CRDs + controller)..."
 	$(MAKE) kind-install
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
@@ -280,11 +309,13 @@ ENVTEST_VERSION ?= latest
 GOLANGCI_LINT_VERSION ?= v1.54.2
 
 ## Kind
-KIND_CLUSTER_NAME ?= saunafs-operator
-KIND_CONFIG       ?= hack/kind-config.yaml
-KIND_IMG          ?= $(IMG)
+KIND_CLUSTER_NAME      ?= saunafs-operator
+KIND_CONFIG            ?= hack/kind-config.yaml
+KIND_IMG               ?= $(IMG)
 # Root directory on the real host that is bind-mounted into Kind nodes as /mnt/hdd00X
-KIND_DATA_DIR     ?= /tmp/saunafs-kind
+KIND_DATA_DIR          ?= /tmp/saunafs-kind
+# kube-rbac-proxy: gcr.io/kubebuilder is defunct; use the upstream quay.io registry
+KUBE_RBAC_PROXY_IMG   ?= quay.io/brancz/kube-rbac-proxy:v0.18.0
 
 ## SaunaFS images (built locally from leil-io/saunafs-container)
 SAUNAFS_IMAGES ?= saunafs-master saunafs-chunkserver saunafs-client saunafs-metalogger saunafs-cgiserver nfs-ganesha

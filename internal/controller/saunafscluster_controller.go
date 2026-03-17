@@ -228,10 +228,14 @@ func buildGoalsConfig(goals []saunafsv1alpha1.GoalSpec) (goalsFile, masterSnippe
 }
 
 // reconcileMasterPVC ensures the PersistentVolumeClaim that backs the master
-// metadata directory (/var/lib/saunafs) exists and is owned by the cluster.
-// The PVC is intentionally not deleted when the cluster is deleted so that
-// metadata survives an undeploy/deploy cycle (it must be cleaned up manually
-// or via a separate garbage-collection policy).
+// metadata directory (/var/lib/saunafs) exists.
+//
+// IMPORTANT: the PVC is deliberately NOT given an ownerReference to the
+// SaunaFSCluster CR.  If it were, Kubernetes garbage collection would delete
+// the PVC (and all metadata) whenever the CR is deleted — e.g. during a
+// kind-undeploy / kind-deploy cycle.  The PVC must outlive the CR so that a
+// fresh deployment of the same cluster name re-attaches to the existing
+// metadata.  Manual deletion is required for a full reset (make kind-reset).
 func (r *SaunaFSClusterReconciler) reconcileMasterPVC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
 	pvcName := fmt.Sprintf("%s-master-metadata", cluster.Name)
 
@@ -252,6 +256,13 @@ func (r *SaunaFSClusterReconciler) reconcileMasterPVC(ctx context.Context, clust
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
 			Namespace: cluster.Namespace,
+			// Label so the PVC is identifiable as managed by this operator,
+			// but no ownerReference — see function comment above.
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "saunafs-operator",
+				"app.kubernetes.io/instance":   cluster.Name,
+				"app.kubernetes.io/component":  "master-metadata",
+			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -265,9 +276,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterPVC(ctx context.Context, clust
 			},
 		},
 	}
-	if err := ctrl.SetControllerReference(cluster, desired, r.Scheme); err != nil {
-		return err
-	}
+	// No SetControllerReference — intentional, see function comment.
 
 	existing := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: cluster.Namespace}, existing)

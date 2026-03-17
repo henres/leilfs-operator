@@ -229,6 +229,9 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy opera
 	@echo "==> Pulling and loading kube-rbac-proxy..."
 	docker pull $(KUBE_RBAC_PROXY_IMG)
 	$(KIND) load docker-image $(KUBE_RBAC_PROXY_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Pulling and loading busybox (NFS initContainer)..."
+	docker pull busybox:1.36
+	$(KIND) load docker-image busybox:1.36 --name $(KIND_CLUSTER_NAME)
 	@echo "==> Deploying operator (CRDs + controller)..."
 	$(MAKE) kind-install
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
@@ -253,6 +256,9 @@ kind-build-and-deployment: ## FULL RESET: delete cluster+data, rebuild everythin
 	@echo "==> Pulling and loading kube-rbac-proxy..."
 	docker pull $(KUBE_RBAC_PROXY_IMG)
 	$(KIND) load docker-image $(KUBE_RBAC_PROXY_IMG) --name $(KIND_CLUSTER_NAME)
+	@echo "==> Pulling and loading busybox (NFS initContainer)..."
+	docker pull busybox:1.36
+	$(KIND) load docker-image busybox:1.36 --name $(KIND_CLUSTER_NAME)
 	@echo "==> Deploying operator (CRDs + controller)..."
 	$(MAKE) kind-install
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)

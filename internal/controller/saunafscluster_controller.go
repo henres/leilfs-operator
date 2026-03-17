@@ -834,9 +834,8 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	// export list and the mount fails.
 	ganeshaConf := fmt.Sprintf(`NFS_Core_Param
 {
-    mount_path_pseudo  = true;
-    Protocols          = 3, 4;
-    show_v4_mount_path = true;
+    mount_path_pseudo = true;
+    Protocols         = 3, 4;
 }
 
 EXPORT
@@ -903,6 +902,25 @@ EXPORT
 				Spec: corev1.PodSpec{
 					NodeSelector: nfs.NodeSelector,
 					Tolerations:  nfs.Tolerations,
+					// Wait for the SaunaFS master to accept TCP connections on
+					// port 9421 before starting ganesha. Without this guard,
+					// ganesha tries to mount the SaunaFS filesystem during its
+					// startup sequence and, if the master is not yet ready (e.g.
+					// after a simultaneous restart), it fails permanently — it
+					// does not retry the mount on its own.
+					InitContainers: []corev1.Container{
+						{
+							Name:            "wait-for-master",
+							Image:           "busybox:1.36",
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command: []string{"sh", "-c",
+								fmt.Sprintf(
+									`until nc -z %s 9421 2>/dev/null; do echo "waiting for saunafs-master:9421..."; sleep 2; done; echo "saunafs-master ready"`,
+									masterHost,
+								),
+							},
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							// Single container: ganesha.nfsd with the SaunaFS

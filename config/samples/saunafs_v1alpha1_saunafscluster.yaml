@@ -11,8 +11,8 @@ metadata:
 spec:
   master:
     image: saunafs-master:latest
-    nodeSelector:
-      saunafs-role: master
+    # nodeSelector:
+    #   saunafs-role: master
     ports:
       - name: client
         containerPort: 9421

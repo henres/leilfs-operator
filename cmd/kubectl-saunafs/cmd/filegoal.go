@@ -20,12 +20,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
+
+// mountPoint is where the SaunaFS root is mounted inside the ephemeral pod.
+const mountPoint = "/mnt/saunafs"
 
 func newFileGoalCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -33,11 +39,12 @@ func newFileGoalCmd(opts *rootOptions) *cobra.Command {
 		Short: "Get or set the storage goal of a file or directory",
 		Long: `Get or set the SaunaFS storage goal on a file or directory inside the cluster.
 
-This command operates on paths inside the SaunaFS filesystem (not host paths).
-It spins up a short-lived Pod using the saunafs-client image, mounts the
-filesystem, runs saunafs getgoal / saunafs setgoal, then removes the pod.
+saunafs getgoal / setgoal operate on paths inside a mounted SaunaFS filesystem.
+This command mounts the filesystem via sfsmount inside a short-lived privileged
+Pod, runs the tool, then unmounts and removes the pod.
 
-Use the 'get' subcommand to read the current goal, and 'set' to change it.`,
+The <path> argument is relative to the root of the SaunaFS filesystem
+(e.g. / or /mydir/myfile).`,
 	}
 
 	cmd.AddCommand(
@@ -59,8 +66,9 @@ func newFileGoalGetCmd(opts *rootOptions) *cobra.Command {
 		Short: "Show the storage goal of a file or directory",
 		Long: `Display the current SaunaFS storage goal for a path inside the filesystem.
 
-The path must be a SaunaFS path (e.g. / or /mydir/myfile), not a host path.
-A short-lived client Pod is created to run 'saunafs getgoal', then deleted.
+The path is relative to the SaunaFS root (e.g. / or /mydir/myfile).
+A privileged client Pod is created to mount the filesystem via sfsmount and run
+'saunafs getgoal', then deleted.
 
 Examples:
   # Show the goal of the root directory
@@ -88,17 +96,19 @@ func runFileGoalGet(opts *rootOptions, clusterName, path string, recursive bool,
 		return err
 	}
 
-	// saunafs getgoal [-r] <path> <master-host> <master-port>
-	args := []string{"saunafs", "getgoal"}
+	// saunafs getgoal [-r] <mountpoint/path>
+	getgoalCmd := "saunafs getgoal"
 	if recursive {
-		args = append(args, "-r")
+		getgoalCmd += " -r"
 	}
-	args = append(args, path, masterSvcName, "9421")
+	getgoalCmd += " " + mountPoint + normalizePath(path)
+
+	script := buildMountScript(masterSvcName, getgoalCmd)
 
 	fmt.Fprintf(os.Stderr, "Using client image: %s\n", clientImage)
-	fmt.Fprintf(os.Stderr, "Running: %v\n\n", args)
+	fmt.Fprintf(os.Stderr, "Mounting SaunaFS from %s, then: saunafs getgoal %s\n\n", masterSvcName, path)
 
-	return runEphemeralPod(context.Background(), k8s, ns, clusterName, clientImage, args)
+	return runFUSEPod(context.Background(), k8s, ns, clusterName, clientImage, script)
 }
 
 // ── filegoal set ─────────────────────────────────────────────────────────────
@@ -113,8 +123,9 @@ func newFileGoalSetCmd(opts *rootOptions) *cobra.Command {
 		Long: `Set the SaunaFS storage goal for a path inside the filesystem.
 
 The goal can be a name (e.g. ec_4_2) or a numeric ID (e.g. 10).
-The path must be a SaunaFS path (e.g. / or /mydir), not a host path.
-A short-lived client Pod is created to run 'saunafs setgoal', then deleted.
+The path is relative to the SaunaFS root (e.g. / or /mydir).
+A privileged client Pod is created to mount the filesystem via sfsmount and run
+'saunafs setgoal', then deleted.
 
 The metadata change is immediate; physical chunk rebalancing is asynchronous
 and may take minutes to hours depending on the amount of data.
@@ -126,8 +137,8 @@ Examples:
   # Set goal recursively on a directory
   kubectl saunafs filegoal set my-cluster ec_4_2 /data -r
 
-  # Set goal by numeric ID
-  kubectl saunafs filegoal set my-cluster 2 /data -r`,
+  # Apply to the entire filesystem
+  kubectl saunafs filegoal set my-cluster ec_4_2 / -r`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runFileGoalSet(opts, args[0], args[1], args[2], recursive, clientImage)
@@ -148,23 +159,118 @@ func runFileGoalSet(opts *rootOptions, clusterName, goal, path string, recursive
 		return err
 	}
 
-	// saunafs setgoal [-r] <goal> <path> <master-host> <master-port>
-	args := []string{"saunafs", "setgoal"}
+	// saunafs setgoal [-r] <goal> <mountpoint/path>
+	setgoalCmd := fmt.Sprintf("saunafs setgoal %s", goal)
 	if recursive {
-		args = append(args, "-r")
+		setgoalCmd += " -r"
 	}
-	args = append(args, goal, path, masterSvcName, "9421")
+	setgoalCmd += " " + mountPoint + normalizePath(path)
+
+	script := buildMountScript(masterSvcName, setgoalCmd)
 
 	fmt.Fprintf(os.Stderr, "Using client image: %s\n", clientImage)
-	fmt.Fprintf(os.Stderr, "Running: %v\n\n", args)
+	fmt.Fprintf(os.Stderr, "Mounting SaunaFS from %s, then: saunafs setgoal %s %s\n\n", masterSvcName, goal, path)
 
-	return runEphemeralPod(context.Background(), k8s, ns, clusterName, clientImage, args)
+	return runFUSEPod(context.Background(), k8s, ns, clusterName, clientImage, script)
 }
 
-// ── shared setup ─────────────────────────────────────────────────────────────
+// ── shared helpers ────────────────────────────────────────────────────────────
 
-// prepareFileGoalRun resolves the Kubernetes clients, namespace, client image,
-// and master service name needed by both get and set subcommands.
+// normalizePath ensures the path starts with / and has no trailing slash
+// (except for the root "/").
+func normalizePath(p string) string {
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if p != "/" {
+		p = strings.TrimRight(p, "/")
+	}
+	// Root stays as "" so mountPoint+normalizePath("/") == "/mnt/saunafs"
+	if p == "/" {
+		return ""
+	}
+	return p
+}
+
+// buildMountScript returns a shell script that:
+//  1. Creates the mountpoint directory
+//  2. Mounts the SaunaFS root via sfsmount
+//  3. Runs the given command
+//  4. Unmounts (best effort)
+func buildMountScript(masterSvcName, command string) string {
+	return fmt.Sprintf(`set -e
+mkdir -p %s
+sfsmount %s -H %s
+%s
+sfsmount -u %s || true`,
+		mountPoint,
+		mountPoint,
+		masterSvcName,
+		command,
+		mountPoint,
+	)
+}
+
+// runFUSEPod creates a privileged pod with /dev/fuse that runs a shell script,
+// streams its output, then deletes the pod.
+func runFUSEPod(
+	ctx context.Context,
+	k8s kubernetes.Interface,
+	ns, clusterName, image, script string,
+) error {
+	privileged := true
+	hostPathType := corev1.HostPathCharDev
+
+	podName := fmt.Sprintf("%s-filegoal-%d", clusterName, time.Now().UnixNano()%1_000_000_000)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: ns,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "kubectl-saunafs",
+				"app.kubernetes.io/instance":   clusterName,
+			},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:            "saunafs-client",
+					Image:           image,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					Command:         []string{"sh", "-c", script},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &privileged,
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "fuse", MountPath: "/dev/fuse"},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "fuse",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/dev/fuse",
+							Type: &hostPathType,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := k8s.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating filegoal pod: %w", err)
+	}
+
+	return streamAndWaitPod(ctx, k8s, ns, podName, "saunafs-client")
+}
+
+// prepareFileGoalRun resolves clients, namespace, client image and master
+// service name — shared by both get and set subcommands.
 func prepareFileGoalRun(opts *rootOptions, clusterName, clientImageOverride string) (
 	k8sClient kubernetes.Interface,
 	ns string,
@@ -207,6 +313,5 @@ func prepareFileGoalRun(opts *rootOptions, clusterName, clientImageOverride stri
 	}
 
 	masterSvcName = fmt.Sprintf("%s-master", clusterName)
-
 	return k8sClient, ns, clientImage, masterSvcName, nil
 }

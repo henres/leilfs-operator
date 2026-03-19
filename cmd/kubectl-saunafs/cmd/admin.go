@@ -183,10 +183,9 @@ func runEphemeralPod(
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:    "saunafs-admin",
-					Image:   image,
-					Command: command,
-					// Use the same image pull policy as the master.
+					Name:            "saunafs-admin",
+					Image:           image,
+					Command:         command,
 					ImagePullPolicy: corev1.PullIfNotPresent,
 				},
 			},
@@ -197,27 +196,32 @@ func runEphemeralPod(
 	if err != nil {
 		return fmt.Errorf("creating ephemeral pod: %w", err)
 	}
+	return streamAndWaitPod(ctx, k8s, ns, createdPod.Name, "saunafs-admin")
+}
 
+// streamAndWaitPod waits for a pod to start, streams its logs to stdout, then
+// deletes the pod. It is shared by runEphemeralPod and runPrivilegedEphemeralPod.
+func streamAndWaitPod(ctx context.Context, k8s kubernetes.Interface, ns, podName, containerName string) error {
 	// Ensure the pod is deleted regardless of outcome.
 	defer func() {
 		delCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = k8s.CoreV1().Pods(ns).Delete(delCtx, createdPod.Name, metav1.DeleteOptions{})
+		_ = k8s.CoreV1().Pods(ns).Delete(delCtx, podName, metav1.DeleteOptions{})
 	}()
 
-	fmt.Fprintf(os.Stderr, "Waiting for pod %q to start...\n", createdPod.Name)
+	fmt.Fprintf(os.Stderr, "Waiting for pod %q to start...\n", podName)
 
 	// Wait for the pod to reach Running or a terminal state.
-	if err := waitForPodRunningOrDone(ctx, k8s, ns, createdPod.Name, 60*time.Second); err != nil {
+	if err := waitForPodRunningOrDone(ctx, k8s, ns, podName, 60*time.Second); err != nil {
 		return err
 	}
 
 	// Stream logs.
 	logOpts := &corev1.PodLogOptions{
-		Container: "saunafs-admin",
+		Container: containerName,
 		Follow:    true,
 	}
-	req := k8s.CoreV1().Pods(ns).GetLogs(createdPod.Name, logOpts)
+	req := k8s.CoreV1().Pods(ns).GetLogs(podName, logOpts)
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		return fmt.Errorf("opening log stream: %w", err)
@@ -229,7 +233,7 @@ func runEphemeralPod(
 	}
 
 	// Check final pod phase to propagate failure.
-	finalPod, err := k8s.CoreV1().Pods(ns).Get(ctx, createdPod.Name, metav1.GetOptions{})
+	finalPod, err := k8s.CoreV1().Pods(ns).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		// Pod may already be gone; treat as success since we got the logs.
 		return nil
@@ -237,13 +241,13 @@ func runEphemeralPod(
 	if finalPod.Status.Phase == corev1.PodFailed {
 		// Surface the container's exit message if available.
 		for _, cs := range finalPod.Status.ContainerStatuses {
-			if cs.Name == "saunafs-admin" && cs.State.Terminated != nil {
-				return fmt.Errorf("saunafs-admin exited with code %d: %s",
+			if cs.Name == containerName && cs.State.Terminated != nil {
+				return fmt.Errorf("pod exited with code %d: %s",
 					cs.State.Terminated.ExitCode,
 					cs.State.Terminated.Message)
 			}
 		}
-		return fmt.Errorf("ephemeral pod %q failed", createdPod.Name)
+		return fmt.Errorf("ephemeral pod %q failed", podName)
 	}
 
 	return nil

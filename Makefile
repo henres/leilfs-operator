@@ -50,7 +50,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="scripts/boilerplate.go.txt" paths="./..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -115,7 +115,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	$(CONTAINER_TOOL) build -t ${IMG} -f docker/operator.Dockerfile .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -131,7 +131,7 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' docker/operator.Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name project-v3-builder
 	$(CONTAINER_TOOL) buildx use project-v3-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
@@ -161,7 +161,7 @@ kind-prepare-dirs: ## Create host directories bind-mounted as /mnt/hdd001 and /m
 	  $(KIND_DATA_DIR)/worker-chunk-2/hdd002
 
 .PHONY: kind-create
-kind-create: kind-prepare-dirs ## Create a Kind cluster using hack/kind-config.yaml.
+kind-create: kind-prepare-dirs ## Create a Kind cluster using scripts/kind-config.yaml.
 	$(KIND) create cluster --name $(KIND_CLUSTER_NAME) --config $(KIND_CONFIG)
 
 .PHONY: kind-delete
@@ -187,7 +187,7 @@ kind-undeploy: kustomize ## Remove the operator from the Kind cluster.
 
 .PHONY: saunafs-images
 saunafs-images: ## Clone leil-io/saunafs-container and build saunafs-master/chunkserver/client/metalogger images.
-	bash hack/build-saunafs-images.sh
+	bash scripts/build-saunafs-images.sh
 
 .PHONY: kind-load-saunafs
 kind-load-saunafs: ## Load the locally built SaunaFS images into the Kind cluster.
@@ -316,7 +316,7 @@ GOLANGCI_LINT_VERSION ?= v1.54.2
 
 ## Kind
 KIND_CLUSTER_NAME      ?= saunafs-operator
-KIND_CONFIG            ?= hack/kind-config.yaml
+KIND_CONFIG            ?= scripts/kind-config.yaml
 KIND_IMG               ?= $(IMG)
 # Root directory on the real host that is bind-mounted into Kind nodes as /mnt/hdd00X
 KIND_DATA_DIR          ?= /tmp/saunafs-kind

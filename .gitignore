@@ -29,6 +29,7 @@ go.work
 
 .venv
 
-# Root-level stray build artefacts
+# Root-level stray build artefacts (binaries produced by ad-hoc go build)
 /kubectl-saunafs
 /main
+/e2e.test

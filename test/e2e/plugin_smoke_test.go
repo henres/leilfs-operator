@@ -273,4 +273,36 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 			Expect(out).To(MatchRegexp(`(?i)master|shadow|personality`))
 		})
 	})
+
+	// -------------------------------------------------------------------------
+	// filegoal  (uses a privileged FUSE pod with sfsmount)
+	// -------------------------------------------------------------------------
+	Describe("filegoal", Ordered, func() {
+		// These tests spin up privileged FUSE pods — give them more time.
+		SetDefaultEventuallyTimeout(3 * time.Minute)
+
+		It("gets the goal of the root directory without error", func() {
+			out, err := runPlugin(bin, "-n", ns, "filegoal", "get", cluster, "/")
+			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal get / failed:\n%s", out)
+			// output format: "/mnt/saunafs: <goal-name>"
+			Expect(out).To(MatchRegexp(`/mnt/saunafs:\s+\S+`))
+		})
+
+		It("sets the goal of the root directory to ec_4_2", func() {
+			out, err := runPlugin(bin, "-n", ns, "filegoal", "set", cluster, "ec_4_2", "/")
+			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal set ec_4_2 / failed:\n%s", out)
+			Expect(out).To(MatchRegexp(`/mnt/saunafs`))
+		})
+
+		It("gets the goal again and shows ec_4_2", func() {
+			out, err := runPlugin(bin, "-n", ns, "filegoal", "get", cluster, "/")
+			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal get / failed:\n%s", out)
+			Expect(out).To(ContainSubstring("ec_4_2"))
+		})
+
+		It("returns an error for a non-existent cluster", func() {
+			out, err := runPlugin(bin, "-n", ns, "filegoal", "get", "does-not-exist", "/")
+			Expect(err).To(HaveOccurred(), "expected error for missing cluster, got:\n%s", out)
+		})
+	})
 })

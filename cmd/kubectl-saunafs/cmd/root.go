@@ -57,8 +57,14 @@ Examples:
   # Stream logs from the master pod
   kubectl saunafs logs my-cluster
 
-  # Run a saunafs-admin command on the master pod
-  kubectl saunafs admin my-cluster -- info`,
+	# Run a saunafs-admin command on the master pod
+  kubectl saunafs admin my-cluster -- info
+
+  # Show the goal of a path
+  kubectl saunafs filegoal get my-cluster /
+
+  # Change the goal of a directory recursively
+  kubectl saunafs filegoal set my-cluster ec_4_2 /data -r`,
 		SilenceUsage: true,
 	}
 
@@ -81,6 +87,7 @@ Examples:
 		newGoalsCmd(opts),
 		newLogsCmd(opts),
 		newAdminCmd(opts),
+		newFileGoalCmd(opts),
 	)
 
 	return root

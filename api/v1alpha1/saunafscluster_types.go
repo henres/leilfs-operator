@@ -219,7 +219,7 @@ type CSISpec struct {
 type WebUISpec struct {
 	// Enabled controls whether the CGI interface Deployment is created.
 	Enabled *bool `json:"enabled,omitempty"`
-	// Image overrides the default saunafs-cgiserver:latest image.
+	// Image overrides the default saunafs-cgiserver image (ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest).
 	Image string `json:"image,omitempty"`
 	// Replicas is the number of cgiserver pods (defaults to 1).
 	Replicas *int32 `json:"replicas,omitempty"`

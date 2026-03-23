@@ -312,7 +312,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterDeployment(ctx context.Context
 	name := fmt.Sprintf("%s-master", cluster.Name)
 	image := cluster.Spec.Master.Image
 	if image == "" {
-		image = "saunafs-master:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-master:latest"
 	}
 
 	ports := masterContainerPorts(cluster)
@@ -529,7 +529,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 		image = cluster.Spec.Chunk.Image
 	}
 	if image == "" {
-		image = "saunafs-chunkserver:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-chunkserver:latest"
 	}
 
 	var replicas int32 = 1
@@ -682,7 +682,7 @@ func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, clust
 
 	image := iface.Image
 	if image == "" {
-		image = "saunafs-cgiserver:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest"
 	}
 
 	port := iface.Port
@@ -896,7 +896,7 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	// ── defaults ─────────────────────────────────────────────────────────────
 	ganeshaImage := nfs.Image
 	if ganeshaImage == "" {
-		ganeshaImage = "nfs-ganesha:latest"
+		ganeshaImage = "ghcr.io/henres/saunafs-operator/nfs-ganesha:latest"
 	}
 	var replicas int32 = 1
 	if nfs.Replicas != nil {

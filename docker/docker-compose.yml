@@ -1,0 +1,30 @@
+# Build and push the operator images to ghcr.io.
+#
+#   OPERATOR_IMAGE_TAG  – tag for the saunafs-operator image.
+#                         Follows the git tag of the repo (v-prefix stripped).
+#                         Defaults to "latest".
+#
+#   GANESHA_VERSION     – NFS-Ganesha git tag to build. To change it, edit the
+#                         two values below (build arg + image tag) manually.
+#                         Current version: V9.2
+#
+# Usage:
+#   docker compose build --push                            # latest
+#   OPERATOR_IMAGE_TAG=1.2.3 docker compose build --push  # versioned operator
+#   docker compose build --push nfs-ganesha               # nfs-ganesha only
+#   docker compose build --push operator                  # operator only
+
+services:
+  operator:
+    build:
+      context: ..
+      dockerfile: docker/operator.Dockerfile
+    image: ghcr.io/henres/saunafs-operator/saunafs-operator:${OPERATOR_IMAGE_TAG:-latest}
+
+  nfs-ganesha:
+    build:
+      context: .
+      dockerfile: nfs-ganesha.Dockerfile
+      args:
+        GANESHA_VERSION: V9.8
+    image: ghcr.io/henres/saunafs-operator/nfs-ganesha:9.8

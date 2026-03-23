@@ -1,4 +1,4 @@
-# ── Stage 1: build NFS-Ganesha V9.2 from source ──────────────────────────────
+# ── Stage 1: build NFS-Ganesha from source ───────────────────────────────────
 # Mirrors exactly the SaunaFS CI workflow:
 # https://github.com/leil-io/saunafs/blob/dev/.github/workflows/run-unit-and-ganesha-tests.yml
 #
@@ -7,7 +7,12 @@
 # libntirpc4.3t64 does NOT export this symbol in its dynamic table, causing
 # dlopen to fail. Ganesha v9.2 ships ntirpc as a bundled submodule that DOES
 # export the symbol — so we must build from source.
+
+# GANESHA_VERSION: git tag of nfs-ganesha to build (e.g. V9.2)
+ARG GANESHA_VERSION=V9.2
+
 FROM ubuntu:24.04 AS ganesha-builder
+ARG GANESHA_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -39,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Download ganesha V9.2 + its pinned ntirpc submodule commit via wget (avoids
+# Download ganesha ${GANESHA_VERSION} + its pinned ntirpc submodule commit via wget (avoids
 # git SSL issues in restricted build environments). ntirpc commit pinned by
 # ganesha V9.2: 366b5c3c1f8cb4090df942ce57e9913be96406a9
 # -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu pins the FSAL destination to
@@ -47,7 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uses — so no symlink juggling is needed in the runtime stage.
 RUN set -eux; \
     wget -q -O /tmp/ganesha.tar.gz \
-        https://github.com/nfs-ganesha/nfs-ganesha/archive/refs/tags/V9.2.tar.gz; \
+        "https://github.com/nfs-ganesha/nfs-ganesha/archive/refs/tags/${GANESHA_VERSION}.tar.gz"; \
     wget -q -O /tmp/ntirpc.tar.gz \
         https://github.com/nfs-ganesha/ntirpc/archive/366b5c3c1f8cb4090df942ce57e9913be96406a9.tar.gz; \
     mkdir -p /usr/src/nfs-ganesha /usr/src/nfs-ganesha/src/libntirpc; \
@@ -80,7 +85,7 @@ RUN set -eux; \
     mkdir -p /tmp/ganesha-install/usr/lib/x86_64-linux-gnu/ganesha; \
     rm -rf /usr/src/nfs-ganesha
 
-# ── Stage 2: minimal runtime with Ganesha v9.2 + SaunaFS FSAL ─────────────────
+# ── Stage 2: minimal runtime with Ganesha + SaunaFS FSAL ──────────────────────
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

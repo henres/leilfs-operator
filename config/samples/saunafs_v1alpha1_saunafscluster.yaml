@@ -10,7 +10,7 @@ metadata:
   name: saunafscluster-sample
 spec:
   master:
-    image: saunafs-master:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-master:latest
     # nodeSelector:
     #   saunafs-role: master
     ports:
@@ -29,7 +29,7 @@ spec:
   # This layout enables ec(4,2) erasure coding (50% overhead, tolerates 2 simultaneous failures).
   # Node names follow the kind convention for cluster name "saunafs-operator".
   chunk:
-    image: saunafs-chunkserver:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-chunkserver:latest
     ports:
       - name: data
         containerPort: 9422
@@ -67,7 +67,7 @@ spec:
   csi:
     enabled: false
     driverName: saunafs.csi.saunafs-operator.io
-    image: saunafs-client:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-client:latest
   goals:
     - id: 10
       name: ec_4_2
@@ -77,11 +77,11 @@ spec:
       default: true
   interface:
     enabled: true
-    image: saunafs-cgiserver:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest
     serviceType: NodePort
   nfs:
     enabled: true
-    image: nfs-ganesha:latest
+    image: ghcr.io/henres/saunafs-operator/nfs-ganesha:latest
     exportPath: /
     squash: No_Root_Squash
     serviceType: NodePort

@@ -1,6 +1,7 @@
 
-# Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/henres/saunafs-operator/saunafs-operator:latest
+# Image URLs for building/pushing
+IMG             ?= ghcr.io/henres/saunafs-operator/saunafs-operator:latest
+NFS_GANESHA_IMG ?= ghcr.io/henres/saunafs-operator/nfs-ganesha:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.29.0
 
@@ -114,12 +115,31 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build: ## Build the operator image.
 	$(CONTAINER_TOOL) build -t ${IMG} -f docker/operator.Dockerfile .
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
+docker-push: ## Push the operator image.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: docker-build-nfs-ganesha
+docker-build-nfs-ganesha: ## Build the NFS-Ganesha image via docker compose.
+	OPERATOR_IMAGE_TAG=$(shell echo ${NFS_GANESHA_IMG} | sed 's/.*://') \
+	  docker compose -f docker/docker-compose.yml build nfs-ganesha
+
+.PHONY: docker-push-nfs-ganesha
+docker-push-nfs-ganesha: ## Push the NFS-Ganesha image via docker compose.
+	docker compose -f docker/docker-compose.yml push nfs-ganesha
+
+.PHONY: docker-build-all
+docker-build-all: ## Build both operator and NFS-Ganesha images via docker compose.
+	OPERATOR_IMAGE_TAG=$(shell echo ${IMG} | sed 's/.*://') \
+	  docker compose -f docker/docker-compose.yml build
+
+.PHONY: docker-push-all
+docker-push-all: docker-build-all ## Build and push both images via docker compose.
+	OPERATOR_IMAGE_TAG=$(shell echo ${IMG} | sed 's/.*://') \
+	  docker compose -f docker/docker-compose.yml push
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -152,7 +172,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 
 .PHONY: kind-prepare-dirs
 kind-prepare-dirs: ## Create host directories bind-mounted as /mnt/hdd001 and /mnt/hdd002 in each Kind worker node.
-	mkdir -p \
+	sudo mkdir -p \
 	  $(KIND_DATA_DIR)/worker-master/hdd001 \
 	  $(KIND_DATA_DIR)/worker-master/hdd002 \
 	  $(KIND_DATA_DIR)/worker-chunk-1/hdd001 \
@@ -185,46 +205,33 @@ kind-deploy: kind-load kind-install ## Load image and deploy the operator to the
 kind-undeploy: kustomize ## Remove the operator from the Kind cluster.
 	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) delete --ignore-not-found=true -f -
 
-.PHONY: saunafs-images
-saunafs-images: ## Clone leil-io/saunafs-container and build saunafs-master/chunkserver/client/metalogger images.
-	bash scripts/build-saunafs-images.sh
-
-.PHONY: kind-load-saunafs
-kind-load-saunafs: ## Load the locally built SaunaFS images into the Kind cluster.
-	@for img in $(SAUNAFS_IMAGES); do \
-	  echo "Loading $${img}:latest into Kind..."; \
-	  $(KIND) load docker-image $${img}:latest --name $(KIND_CLUSTER_NAME); \
-	done
 
 .PHONY: nfs-ganesha-build
 nfs-ganesha-build: ## Build the custom NFS-Ganesha image from docker/nfs-ganesha.Dockerfile.
-	docker build -t nfs-ganesha:latest -f docker/nfs-ganesha.Dockerfile docker/
+	docker build -t $(NFS_GANESHA_IMG) -f docker/nfs-ganesha.Dockerfile docker/
 
 .PHONY: kind-load-nfs-ganesha
 kind-load-nfs-ganesha: nfs-ganesha-build ## Build and load the NFS-Ganesha image into Kind.
-	$(KIND) load docker-image nfs-ganesha:latest --name $(KIND_CLUSTER_NAME)
+	$(KIND) load docker-image $(NFS_GANESHA_IMG) --name $(KIND_CLUSTER_NAME)
 
 .PHONY: kind-test
-kind-test: kind-create saunafs-images kind-load-saunafs kind-deploy ## Build SaunaFS images, create Kind cluster and deploy the operator end-to-end.
+kind-test: kind-create kind-deploy ## Create Kind cluster and deploy the operator end-to-end.
 
 .PHONY: kind-sample
 kind-sample: ## Apply the SaunaFSCluster sample CR to the Kind cluster.
 	$(KIND_KUBECTL) apply -f config/samples/saunafs_v1alpha1_saunafscluster.yaml
 
 .PHONY: kind-reset
-kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy operator and sample.
+kind-reset: ## FULL RESET: delete cluster+data, rebuild operator image and redeploy.
 	@echo "==> Deleting Kind cluster (if exists)..."
 	-$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
 	@echo "==> Wiping data directories (sudo required for root-owned chunk files)..."
 	sudo rm -rf $(KIND_DATA_DIR)
 	@echo "==> Recreating cluster and host dirs..."
 	$(MAKE) kind-create
-	@echo "==> Building SaunaFS images..."
-	$(MAKE) saunafs-images
 	@echo "==> Building controller image..."
 	$(MAKE) docker-build
-	@echo "==> Loading all images into Kind..."
-	$(MAKE) kind-load-saunafs
+	@echo "==> Loading controller image into Kind..."
 	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
 	@echo "==> Pulling and loading kube-rbac-proxy..."
 	docker pull $(KUBE_RBAC_PROXY_IMG)
@@ -245,13 +252,10 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild everything, deploy opera
 
 
 .PHONY: kind-build-and-deployment
-kind-build-and-deployment: ## FULL RESET: delete cluster+data, rebuild everything, deploy operator and sample.
-	@echo "==> Building SaunaFS images..."
-	$(MAKE) saunafs-images
+kind-build-and-deployment: ## Build operator image and deploy to an existing Kind cluster.
 	@echo "==> Building controller image..."
 	$(MAKE) docker-build
-	@echo "==> Loading all images into Kind..."
-	$(MAKE) kind-load-saunafs
+	@echo "==> Loading controller image into Kind..."
 	$(KIND) load docker-image $(KIND_IMG) --name $(KIND_CLUSTER_NAME)
 	@echo "==> Pulling and loading kube-rbac-proxy..."
 	docker pull $(KUBE_RBAC_PROXY_IMG)
@@ -323,8 +327,6 @@ KIND_DATA_DIR          ?= /tmp/saunafs-kind
 # kube-rbac-proxy: gcr.io/kubebuilder is defunct; use the upstream quay.io registry
 KUBE_RBAC_PROXY_IMG   ?= quay.io/brancz/kube-rbac-proxy:v0.18.0
 
-## SaunaFS images (built locally from leil-io/saunafs-container)
-SAUNAFS_IMAGES ?= saunafs-master saunafs-chunkserver saunafs-client saunafs-metalogger saunafs-cgiserver nfs-ganesha
 # kubectl shorthand pre-configured for the Kind cluster context
 KIND_KUBECTL   = $(KUBECTL) --context kind-$(KIND_CLUSTER_NAME)
 

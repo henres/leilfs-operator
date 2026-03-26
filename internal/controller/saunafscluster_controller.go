@@ -60,8 +60,7 @@ const (
 	// matches this label so traffic always reaches the active pod.
 	labelActiveMaster = "saunafs.io/active-master"
 
-	// labelMasterRole distinguishes primary ("primary") from shadow ("shadow") pods.
-	labelMasterRole = "saunafs.io/master-role"
+	// labelActiveMaster is set to "true" on the pod currently serving as master.
 
 	// leaseDuration is how long the operator considers a Lease valid without renewal.
 	leaseDuration = 15 * time.Second
@@ -1438,10 +1437,14 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 		}
 	}
 
-	// ── init-config command (ordinal-aware) ──────────────────────────────────
-	// HOSTNAME = "<stsName>-<ordinal>" → ORDINAL="${HOSTNAME##*-}"
-	// pod-0  → primary master: just copy examples (+ optional goals overlay)
-	// pod-1+ → shadow: copy examples, then patch PERSONALITY and MASTER_HOST
+	// ── init-config command ───────────────────────────────────────────────────
+	// All pods (including pod-0) start as shadow by default.
+	// The operator promotes whichever pod should be master by writing a
+	// .promote sentinel on its PVC and sending SIGTERM.  The wrapper script
+	// (masterRunCmd) detects the sentinel and starts sfsmaster as master.
+	// The init-container must NOT remove the .promote file — if the operator
+	// wrote it just before the pod restarted, it must survive to be consumed
+	// by the wrapper script.
 	goalsCmd := ""
 	goalsVolume := []corev1.Volume{}
 	goalsMounts := []corev1.VolumeMount{}
@@ -1460,42 +1463,46 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 			MountPath: "/etc/saunafs-goals",
 			ReadOnly:  true,
 		})
-		goalsCmd = `  [ -f /etc/saunafs-goals/sfsgoals.cfg ] && cp /etc/saunafs-goals/sfsgoals.cfg /etc/saunafs/sfsgoals.cfg` + "\n"
+		goalsCmd = `[ -f /etc/saunafs-goals/sfsgoals.cfg ] && cp /etc/saunafs-goals/sfsgoals.cfg /etc/saunafs/sfsgoals.cfg
+`
 	}
 
-	initConfigCmd := fmt.Sprintf(`ORDINAL="${HOSTNAME##*-}"
-mkdir -p /etc/saunafs /var/lib/saunafs
+	initConfigCmd := fmt.Sprintf(`mkdir -p /etc/saunafs /var/lib/saunafs
 cp -r /usr/share/doc/saunafs-master/examples/. /etc/saunafs/
-if [ "$ORDINAL" = "0" ]; then
-%s  : # primary master – no personality patch needed
-else
-  # Clear any stale promotion sentinel so a restarted shadow always starts as shadow.
-  rm -f /var/lib/saunafs/.promote
-  sed -i 's/^# *PERSONALITY *= *.*/PERSONALITY = shadow/' /etc/saunafs/sfsmaster.cfg
-  grep -q "^PERSONALITY" /etc/saunafs/sfsmaster.cfg || echo "PERSONALITY = shadow" >> /etc/saunafs/sfsmaster.cfg
-  sed -i 's/^# *MASTER_HOST *= *sfsmaster/MASTER_HOST = %s/' /etc/saunafs/sfsmaster.cfg
-  grep -q "^MASTER_HOST" /etc/saunafs/sfsmaster.cfg || echo "MASTER_HOST = %s" >> /etc/saunafs/sfsmaster.cfg
-  grep -q "^MASTER_PORT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_PORT = 9419" >> /etc/saunafs/sfsmaster.cfg
-  grep -q "^MASTER_RECONNECTION_DELAY" /etc/saunafs/sfsmaster.cfg || echo "MASTER_RECONNECTION_DELAY = 5" >> /etc/saunafs/sfsmaster.cfg
-  grep -q "^MASTER_TIMEOUT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_TIMEOUT = 60" >> /etc/saunafs/sfsmaster.cfg
-fi`, goalsCmd, masterHost, masterHost)
+%ssed -i 's/^# *PERSONALITY *= *.*/PERSONALITY = shadow/' /etc/saunafs/sfsmaster.cfg
+grep -q "^PERSONALITY" /etc/saunafs/sfsmaster.cfg || echo "PERSONALITY = shadow" >> /etc/saunafs/sfsmaster.cfg
+sed -i 's/^# *MASTER_HOST *= *sfsmaster/MASTER_HOST = %s/' /etc/saunafs/sfsmaster.cfg
+grep -q "^MASTER_HOST" /etc/saunafs/sfsmaster.cfg || echo "MASTER_HOST = %s" >> /etc/saunafs/sfsmaster.cfg
+grep -q "^MASTER_PORT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_PORT = 9419" >> /etc/saunafs/sfsmaster.cfg
+grep -q "^MASTER_RECONNECTION_DELAY" /etc/saunafs/sfsmaster.cfg || echo "MASTER_RECONNECTION_DELAY = 5" >> /etc/saunafs/sfsmaster.cfg
+grep -q "^MASTER_TIMEOUT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_TIMEOUT = 60" >> /etc/saunafs/sfsmaster.cfg`,
+		goalsCmd, masterHost, masterHost)
 
 	initMetaCmd := "cp -n /opt/saunafs/templates/metadata.sfs.empty /var/lib/saunafs/metadata.sfs 2>/dev/null || true"
 
 	// ── Wrapper script (all pods) ─────────────────────────────────────────────
-	// Checks for a .promote sentinel on the PVC (written by the operator during
-	// failover). If found: switches PERSONALITY to master and removes shadow
-	// config lines, then runs the standard start script.
-	// pod-0 never needs this under normal operation, but it works correctly for
-	// the failback case where a promoted shadow is reset to shadow and pod-0
-	// takes back the primary role.
+	// All pods start with PERSONALITY=shadow from the init-container.
+	// The operator promotes a pod by writing .promote to its PVC and sending
+	// SIGTERM.  On the next start the wrapper detects the sentinel, patches the
+	// config to PERSONALITY=master, removes shadow settings, then hands off to
+	// the standard start script.
 	masterRunCmd := `
+# Always remove the lock file before starting.  The startup script calls
+# sfsmetarestore -a when a lock is present, which fails for shadow nodes
+# (they have no changelogs to replay).  Removing it here is safe:
+#   - Shadow restart: nothing to restore; sfsmaster will reconnect and sync.
+#   - Promoted master: we sent SIGTERM cleanly, so metadata was flushed; no
+#     changelog replay needed either.
+rm -f /var/lib/saunafs/metadata.sfs.lock
+
 if [ -f /var/lib/saunafs/.promote ]; then
   echo "[ha] promotion sentinel found – starting as master"
   rm -f /var/lib/saunafs/.promote
   sed -i 's/^PERSONALITY = shadow/PERSONALITY = master/' /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_HOST/d' /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_PORT/d' /etc/saunafs/sfsmaster.cfg
+  sed -i '/^MASTER_RECONNECTION_DELAY/d' /etc/saunafs/sfsmaster.cfg
+  sed -i '/^MASTER_TIMEOUT/d' /etc/saunafs/sfsmaster.cfg
 fi
 exec /saunafs-master.start.sh
 `
@@ -1620,29 +1627,26 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluste
 
 	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
 
-	// ── Gather all master pods (pod-0 = primary, pod-N = shadow) ─────────────
-	masterPods, err := r.listMasterPods(ctx, cluster)
+	// ── Gather all pods of the master StatefulSet ────────────────────────────
+	allCandidates, err := r.listAllMasterStatefulSetPods(ctx, cluster)
 	if err != nil {
 		return err
 	}
-	shadowPods, err := r.listShadowPods(ctx, cluster)
-	if err != nil {
-		return err
-	}
-
-	allCandidates := append(masterPods, shadowPods...)
+	// Sort by name (= by ordinal) so election is deterministic.
+	sort.Slice(allCandidates, func(i, j int) bool {
+		return allCandidates[i].Name < allCandidates[j].Name
+	})
 
 	// ── Determine current active pod ─────────────────────────────────────────
-	// Check both the persisted status AND the live active-master label on pods.
-	// The label is applied immediately upon election (before the status patch is
-	// persisted), so it provides faster convergence across reconcile cycles.
+	// The active pod is tracked in cluster.Status.ActiveMaster.  We also accept
+	// a pod that carries the live active-master label in case the status write
+	// was lost across a controller restart.
 	currentActive := cluster.Status.ActiveMaster
 	activeRunning := false
 	for _, p := range allCandidates {
 		isActive := (p.Name == currentActive) || (p.Labels[labelActiveMaster] == "true")
 		if isActive && isPodRunningReady(&p) {
 			activeRunning = true
-			// Sync the in-memory status so the Lease and subsequent logic agree.
 			if p.Name != currentActive {
 				cluster.Status.ActiveMaster = p.Name
 				currentActive = p.Name
@@ -1666,27 +1670,8 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluste
 		leaseExists = false
 	}
 
-	// ── Failback: prefer pod-0 over a promoted shadow ────────────────────────
-	// If the current active is a shadow pod (ordinal > 0) and pod-0 is now
-	// Running+Ready, trigger a re-election so traffic moves back to the primary.
-	// This handles the failback case without disrupting a healthy shadow-as-master.
-	if activeRunning && currentActive != "" {
-		isPrimary := strings.HasSuffix(currentActive, "-master-0")
-		if !isPrimary {
-			// Current active is a shadow. Check if pod-0 is now ready.
-			for i := range masterPods {
-				if isPodRunningReady(&masterPods[i]) {
-					logger.Info("Primary pod-0 is ready, triggering failback election",
-						"current", currentActive, "primary", masterPods[i].Name)
-					activeRunning = false
-					break
-				}
-			}
-		}
-	}
-
 	if activeRunning {
-		// Just renew the Lease.
+		// Active master is healthy — just renew the Lease. No failback preemption.
 		if !leaseExists {
 			lease = &coordinationv1.Lease{
 				ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: cluster.Namespace},
@@ -1712,105 +1697,65 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluste
 				return err
 			}
 		}
-		// Update ReadyShadows count.
 		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
 		return nil
 	}
 
-	// ── Election: active pod is gone or unknown ───────────────────────────────
+	// ── Election: no active master or it is gone/not-ready ───────────────────
+	// Sticky election: we elect the ready pod with the lowest ordinal.
+	// No preemption — a pod that comes back after a failover simply joins as
+	// shadow (its init-container starts it with PERSONALITY=shadow).
 	logger.Info("Active master not ready, running HA election",
 		"cluster", cluster.Name, "previous", currentActive)
 
+	// Collect all Running-phase pods — we wait if any is Running but not yet
+	// Ready (still initialising), to avoid promoting a shadow unnecessarily.
+	anyRunningNotReady := false
+	var readyCandidates []corev1.Pod
+	for _, p := range allCandidates {
+		if isPodRunningReady(&p) {
+			readyCandidates = append(readyCandidates, p)
+		} else if p.Status.Phase == corev1.PodRunning {
+			anyRunningNotReady = true
+		}
+	}
+
+	if anyRunningNotReady && len(readyCandidates) == 0 {
+		// A pod is starting up — wait a few seconds rather than electing nothing.
+		logger.Info("Pod is starting up, waiting for Ready before electing")
+		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
+		return nil
+	}
+
 	var elected *corev1.Pod
-
-	// Prefer primary master Deployment pod if it is ready.
-	for i := range masterPods {
-		if isPodRunningReady(&masterPods[i]) {
-			elected = &masterPods[i]
-			break
-		}
-	}
-
-	// Only consider shadow promotion if no primary master pod is in Running phase.
-	// A pod that is Running but not yet Ready (e.g. still initialising) will be
-	// ready within seconds — we wait rather than disrupting the shadow.
-	// A pod that is Pending (e.g. unschedulable due to node failure) warrants
-	// shadow promotion since the primary cannot serve traffic.
-	primaryRunning := false
-	for i := range masterPods {
-		if masterPods[i].Status.Phase == corev1.PodRunning {
-			primaryRunning = true
-			break
-		}
-	}
-	if elected == nil && !primaryRunning {
-		readyShadows := []corev1.Pod{}
-		for i := range shadowPods {
-			if isPodRunningReady(&shadowPods[i]) {
-				readyShadows = append(readyShadows, shadowPods[i])
-			}
-		}
-		sort.Slice(readyShadows, func(i, j int) bool {
-			return readyShadows[i].Name < readyShadows[j].Name
-		})
-		if len(readyShadows) > 0 {
-			elected = &readyShadows[0]
-		}
+	if len(readyCandidates) > 0 {
+		elected = &readyCandidates[0] // lowest ordinal wins
 	}
 
 	if elected == nil {
-		logger.Info("No ready master or shadow pod found, waiting")
+		logger.Info("No ready pod found, waiting")
 		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
-		return nil // will be re-triggered by pod watch
+		return nil
 	}
 
-	// If elected is a shadow, promote it.
-	if elected.Labels[labelMasterRole] == "shadow" {
-		logger.Info("Promoting shadow to master", "pod", elected.Name)
-		// Strategy: write a promotion sentinel file to the PVC, then send SIGTERM
-		// to the running sfsmaster process so it exits cleanly.  The container's
-		// wrapper script (masterRunCmd) will detect the sentinel on the next start
-		// and launch sfsmaster with PERSONALITY=master instead of shadow.
-		promoteCmd := []string{"sh", "-c",
-			"touch /var/lib/saunafs/.promote && kill -TERM $(cat /var/run/sfsmaster.pid 2>/dev/null || pgrep sfsmaster) 2>/dev/null || true",
-		}
-		if err := r.execInPod(ctx, cluster.Namespace, elected.Name, "saunafs-master", promoteCmd); err != nil {
-			// Transient errors (container restarting, not yet ready) should not
-			// cause an immediate requeue storm. Log and wait for the next cycle.
-			logger.Info("Shadow promotion exec failed (will retry)", "pod", elected.Name, "err", err.Error())
-			cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
-			return nil
-		}
+	// Promote the elected pod: write the sentinel file then send SIGTERM so
+	// sfsmaster exits and restarts via the wrapper script as master.
+	logger.Info("Promoting pod to master", "pod", elected.Name)
+	promoteCmd := []string{"sh", "-c",
+		"touch /var/lib/saunafs/.promote && kill -TERM $(cat /var/run/sfsmaster.pid 2>/dev/null || pgrep sfsmaster) 2>/dev/null || true",
+	}
+	if err := r.execInPod(ctx, cluster.Namespace, elected.Name, "saunafs-master", promoteCmd); err != nil {
+		logger.Info("Promotion exec failed (will retry)", "pod", elected.Name, "err", err.Error())
+		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
+		return nil
 	}
 
 	// ── Flip labels ───────────────────────────────────────────────────────────
 	newActive := elected.Name
-	for _, p := range allCandidates {
-		wantActive := p.Name == newActive
-		if err := r.setPodActiveMasterLabel(ctx, &p, wantActive); err != nil {
-			logger.Error(err, "Failed to set active-master label", "pod", p.Name)
-			// non-fatal: continue to update the Service
-		}
-	}
-
-	// ── Demote any previously-promoted shadow back to shadow mode ─────────────
-	// When pod-0 is re-elected after a failback, shadow pods that were promoted
-	// (running sfsmaster in master mode) must be restarted so their init-container
-	// re-applies the shadow config (PERSONALITY=shadow + MASTER_HOST).
-	// We delete those pods; the StatefulSet controller will recreate them.
-	for _, p := range allCandidates {
-		if p.Name == newActive {
-			continue // don't touch the newly elected pod
-		}
-		// A shadow pod (ordinal > 0) that was previously the active master
-		// needs to be restarted as shadow.
-		isShadowOrdinal := !strings.HasSuffix(p.Name, "-master-0")
-		if isShadowOrdinal {
-			logger.Info("Deleting promoted shadow pod to re-init as shadow", "pod", p.Name)
-			if err := r.Delete(ctx, &p); err != nil && !errors.IsNotFound(err) {
-				logger.Error(err, "Failed to delete shadow pod for demotion", "pod", p.Name)
-				// non-fatal: StatefulSet will eventually reconcile
-			}
+	for i := range allCandidates {
+		wantActive := allCandidates[i].Name == newActive
+		if err := r.setPodActiveMasterLabel(ctx, &allCandidates[i], wantActive); err != nil {
+			logger.Error(err, "Failed to set active-master label", "pod", allCandidates[i].Name)
 		}
 	}
 
@@ -1894,40 +1839,35 @@ func (r *SaunaFSClusterReconciler) setPodActiveMasterLabel(ctx context.Context, 
 	return r.Patch(ctx, pod, patch)
 }
 
-// listMasterPods returns all pods of the unified master StatefulSet
-// that have ordinal 0 (the primary master pod).
-// In the unified StatefulSet, pod-0 always starts as the primary master.
+// listMasterPods returns the pod currently acting as master, identified by
+// cluster.Status.ActiveMaster.  Returns an empty slice if no active master is
+// recorded yet (bootstrap) or if the pod no longer exists.
 func (r *SaunaFSClusterReconciler) listMasterPods(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) ([]corev1.Pod, error) {
+	if cluster.Status.ActiveMaster == "" {
+		return nil, nil
+	}
 	allPods, err := r.listAllMasterStatefulSetPods(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
-	// pod-0 is the primary master: its name ends with "-master-0"
-	primaryName := fmt.Sprintf("%s-master-0", cluster.Name)
-	var primary []corev1.Pod
 	for _, p := range allPods {
-		if p.Name == primaryName {
-			// Ensure role label is set correctly
-			p.Labels[labelMasterRole] = "primary"
-			primary = append(primary, p)
+		if p.Name == cluster.Status.ActiveMaster {
+			return []corev1.Pod{p}, nil
 		}
 	}
-	return primary, nil
+	return nil, nil
 }
 
-// listShadowPods returns all pods of the unified master StatefulSet
-// that have ordinal > 0 (shadow pods).
+// listShadowPods returns all master StatefulSet pods that are NOT the current
+// active master (i.e. they run as shadow or are starting up).
 func (r *SaunaFSClusterReconciler) listShadowPods(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) ([]corev1.Pod, error) {
 	allPods, err := r.listAllMasterStatefulSetPods(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
-	primaryName := fmt.Sprintf("%s-master-0", cluster.Name)
 	var shadows []corev1.Pod
 	for _, p := range allPods {
-		if p.Name != primaryName {
-			// Ensure role label is set correctly
-			p.Labels[labelMasterRole] = "shadow"
+		if p.Name != cluster.Status.ActiveMaster {
 			shadows = append(shadows, p)
 		}
 	}
@@ -1947,7 +1887,7 @@ func (r *SaunaFSClusterReconciler) listAllMasterStatefulSetPods(ctx context.Cont
 	return podList.Items, err
 }
 
-// countReadyShadows counts ready shadow master pods (ordinal > 0 in the unified StatefulSet).
+// countReadyShadows counts ready shadow pods (all master StatefulSet pods except the active master).
 func (r *SaunaFSClusterReconciler) countReadyShadows(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
 	if cluster.Spec.Shadow == nil {
 		return 0

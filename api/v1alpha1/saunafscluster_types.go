@@ -27,8 +27,20 @@ import (
 type SaunaFSClusterSpec struct {
 	// Master configures the master daemonset.
 	Master MasterSpec `json:"master,omitempty"`
+	// Shadow configures optional shadow master instances. Shadow masters run
+	// with PERSONALITY=shadow and stay fully in sync with the active master via
+	// the metadata changelog stream. The operator manages a Kubernetes Lease to
+	// perform automatic leader election: if the active master pod becomes
+	// unavailable the operator promotes the most up-to-date shadow to master,
+	// updates the master Service selector, and demotes the recovered pod to
+	// shadow — preventing split-brain.
+	Shadow *ShadowSpec `json:"shadow,omitempty"`
 	// Chunk holds defaults shared by all chunk servers and the per-server list.
 	Chunk ChunkSpec `json:"chunk,omitempty"`
+	// Metaloggers configures optional metalogger instances that shadow the
+	// master metadata (warm standby). Each metalogger connects to the master
+	// and maintains an up-to-date copy of the metadata journal.
+	Metalogger *MetaloggerSpec `json:"metalogger,omitempty"`
 	// Goals defines custom storage goals written to sfsgoals.cfg on the master.
 	// Each entry produces one line in the file; the master reads it at startup.
 	// If omitted, SaunaFS uses its built-in defaults (goals 1–9).
@@ -79,6 +91,15 @@ type SaunaFSClusterStatus struct {
 	// TotalChunkServers is the total number of chunk-server StatefulSets
 	// configured in spec.chunk.servers.
 	TotalChunkServers int32 `json:"totalChunkServers,omitempty"`
+	// ReadyMetaloggers is the number of ready metalogger replicas.
+	ReadyMetaloggers int32 `json:"readyMetaloggers,omitempty"`
+	// ActiveMaster is the name of the pod currently holding the master role
+	// (either the primary master pod or a promoted shadow pod).
+	// Empty if no active master is known.
+	ActiveMaster string `json:"activeMaster,omitempty"`
+	// ReadyShadows is the number of shadow master replicas that are Ready and
+	// connected to the active master.
+	ReadyShadows int32 `json:"readyShadows,omitempty"`
 }
 
 // GoalSpec defines one SaunaFS storage goal written to sfsgoals.cfg.
@@ -90,6 +111,7 @@ type SaunaFSClusterStatus struct {
 //
 //	{ id: 2, name: "two_copies",  replication: 2 }
 //	{ id: 10, name: "ec_4_2", ec: { dataParts: 4, parityParts: 2 }, default: true }
+//	{ id: 11, name: "node_spread", replication: 3, nodeLabels: ["node1", "node2", "node3"] }
 type GoalSpec struct {
 	// ID is the numeric identifier for this goal (1–20).
 	// SaunaFS built-in goals occupy IDs 1–9.
@@ -108,6 +130,13 @@ type GoalSpec struct {
 	// EC defines an erasure-coding goal.
 	// Mutually exclusive with Replication.
 	EC *ECSpec `json:"ec,omitempty"`
+	// NodeLabels constrains replication copies to specific chunkserver labels.
+	// When set, each element corresponds to one copy and must match the LABEL
+	// set in sfschunkserver.cfg on the target chunkserver. The pattern becomes
+	// "{ label1 _ } { label2 _ } …" instead of anonymous underscores.
+	// The number of NodeLabels entries must equal Replication when both are set.
+	// Ignored when EC is set.
+	NodeLabels []string `json:"nodeLabels,omitempty"`
 	// Default marks this goal as the cluster-wide default.
 	// At most one goal should set Default=true; the operator writes
 	// SFSMASTER_DEFAULT_GOAL=<Name> in sfsmaster.cfg.
@@ -162,6 +191,51 @@ type MasterSpec struct {
 	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
 }
 
+// ShadowSpec configures the shadow master StatefulSet.
+// Shadow masters run with PERSONALITY=shadow: they stay fully in sync with
+// the active master via the changelog stream and can be promoted instantly
+// without requiring sfsmetarestore. The operator uses a Kubernetes Lease for
+// leader election, ensuring only one pod holds the master role at any time.
+type ShadowSpec struct {
+	// Replicas is the number of shadow instances (default 1).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	Replicas *int32 `json:"replicas,omitempty"`
+	// Image overrides the container image (defaults to the same image as Master).
+	Image string `json:"image,omitempty"`
+	// MetadataStorage configures the PVC template used by each shadow replica
+	// to persist its local copy of the metadata. Each replica gets its own PVC.
+	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
+	// NodeSelector for shadow pods.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations for shadow pods.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// Resources for the shadow container.
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// MetaloggerSpec configures the optional metalogger StatefulSet.// Metaloggers connect to the master and maintain a local copy of the metadata
+// journal, providing warm-standby redundancy without additional licensing.
+// Each replica runs an independent sfsmetal process.
+type MetaloggerSpec struct {
+	// Replicas is the number of metalogger instances (default 0 = disabled).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	Replicas *int32 `json:"replicas,omitempty"`
+	// Image overrides the default saunafs-metalogger container image.
+	Image string `json:"image,omitempty"`
+	// MetadataStorage configures the PVC template used by the metalogger
+	// StatefulSet to persist its copy of the metadata journal.
+	// Each replica gets its own PVC.
+	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
+	// NodeSelector for metalogger pods.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations for metalogger pods.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// Resources for the metalogger container.
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
 // ChunkSpec holds defaults shared by all chunk servers and the individual server list.
 type ChunkSpec struct {
 	// Image is the default container image used for all chunk servers.
@@ -182,6 +256,11 @@ type ChunkServerSpec struct {
 	Image string `json:"image,omitempty"`
 	// NodeName directly schedules this chunk server onto a named node.
 	NodeName string `json:"nodeName"`
+	// Label is the LABEL value written into sfschunkserver.cfg.
+	// It is used by SaunaFS storage goals to pin chunks to specific servers
+	// (e.g. one label per physical node ensures node-level data spreading).
+	// When empty, no LABEL line is written and the chunkserver is anonymous.
+	Label string `json:"label,omitempty"`
 	// MountPaths lists the host paths or PVC mount points used as chunk storage.
 	MountPaths []MountPath `json:"mountPaths,omitempty"`
 	// Tolerations for this chunk server instance.

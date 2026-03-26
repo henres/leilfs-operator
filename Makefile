@@ -205,6 +205,26 @@ kind-deploy: kind-load kind-install ## Load image and deploy the operator to the
 kind-undeploy: kustomize ## Remove the operator from the Kind cluster.
 	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) delete --ignore-not-found=true -f -
 
+.PHONY: kind-create-pull-secret
+kind-create-pull-secret: ## Create ghcr.io pull secret and patch default SA in all workload namespaces. Requires GHCR_PAT=<token>.
+	@if [ -z "$(GHCR_PAT)" ]; then \
+	  echo "ERROR: GHCR_PAT is not set. Usage: make kind-create-pull-secret GHCR_PAT=ghp_xxxx"; \
+	  exit 1; \
+	fi
+	@for ns in $(PULL_SECRET_NAMESPACES); do \
+	  echo "==> Namespace: $${ns}"; \
+	  $(KIND_KUBECTL) create namespace "$${ns}" --dry-run=client -o yaml | $(KIND_KUBECTL) apply -f -; \
+	  $(KIND_KUBECTL) create secret docker-registry $(PULL_SECRET_NAME) \
+	    --namespace="$${ns}" \
+	    --docker-server=ghcr.io \
+	    --docker-username=$(GHCR_USER) \
+	    --docker-password=$(GHCR_PAT) \
+	    --dry-run=client -o yaml | $(KIND_KUBECTL) apply -f -; \
+	  $(KIND_KUBECTL) patch serviceaccount default \
+	    --namespace="$${ns}" \
+	    -p '{"imagePullSecrets":[{"name":"$(PULL_SECRET_NAME)"}]}'; \
+	done
+
 
 .PHONY: nfs-ganesha-build
 nfs-ganesha-build: ## Build the custom NFS-Ganesha image from docker/nfs-ganesha.Dockerfile.
@@ -229,6 +249,8 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild operator image and redep
 	sudo rm -rf $(KIND_DATA_DIR)
 	@echo "==> Recreating cluster and host dirs..."
 	$(MAKE) kind-create
+	@echo "==> Creating ghcr.io pull secret..."
+	$(MAKE) kind-create-pull-secret
 	@echo "==> Building controller image..."
 	$(MAKE) docker-build
 	@echo "==> Loading controller image into Kind..."
@@ -329,6 +351,16 @@ KUBE_RBAC_PROXY_IMG   ?= quay.io/brancz/kube-rbac-proxy:v0.18.0
 
 # kubectl shorthand pre-configured for the Kind cluster context
 KIND_KUBECTL   = $(KUBECTL) --context kind-$(KIND_CLUSTER_NAME)
+
+## ghcr.io pull secret
+# GitHub PAT with read:packages scope — pass on the command line or export in your shell:
+#   export GHCR_PAT=ghp_xxxx
+#   make kind-create-pull-secret
+GHCR_PAT           ?=
+GHCR_USER          ?= henres
+PULL_SECRET_NAME   ?= ghcr-pull-secret
+# Namespaces that need the pull secret (operator system + workload namespace)
+PULL_SECRET_NAMESPACES ?= default saunafs-operator-system
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

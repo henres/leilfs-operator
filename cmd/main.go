@@ -123,8 +123,9 @@ func main() {
 	}
 
 	if err = (&controller.SaunaFSClusterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestConfig: mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SaunaFSCluster")
 		os.Exit(1)

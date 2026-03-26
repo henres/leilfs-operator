@@ -25,9 +25,25 @@ spec:
     # StorageClass defaults to the cluster default (local-path in Kind).
     metadataStorage:
       size: 1Gi
+  # Shadow master — hot standby that receives the changelog stream from the
+  # active master. If the active master disappears the operator promotes the
+  # shadow automatically (no sfsmetarestore needed). Requires at least 1 replica.
+  shadow:
+    replicas: 1
+    image: ghcr.io/henres/saunafs-container/saunafs-master:latest
+    metadataStorage:
+      storageClassName: standard
+      size: 1Gi
+  # Metaloggers — warm standby replicas that shadow master metadata.
+  # Each replica gets its own PVC (local-path StorageClass in Kind).
+  metalogger:
+    replicas: 2
+    image: ghcr.io/henres/saunafs-container/saunafs-metalogger:latest
+    metadataStorage:
+      storageClassName: standard
+      size: 1Gi
   # Chunk servers — 1 chunkserver per disk, 2 disks per node, 3 nodes = 6 chunkservers.
-  # This layout enables ec(4,2) erasure coding (50% overhead, tolerates 2 simultaneous failures).
-  # Node names follow the kind convention for cluster name "saunafs-operator".
+  # label matches the node name so goals can pin chunks to specific nodes.
   chunk:
     image: ghcr.io/henres/saunafs-container/saunafs-chunkserver:latest
     ports:
@@ -36,31 +52,37 @@ spec:
     servers:
       - name: worker1-hdd001
         nodeName: saunafs-operator-worker
+        label: worker1
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker1-hdd002
         nodeName: saunafs-operator-worker
+        label: worker1
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
       - name: worker2-hdd001
         nodeName: saunafs-operator-worker2
+        label: worker2
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker2-hdd002
         nodeName: saunafs-operator-worker2
+        label: worker2
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
       - name: worker3-hdd001
         nodeName: saunafs-operator-worker3
+        label: worker3
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker3-hdd002
         nodeName: saunafs-operator-worker3
+        label: worker3
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
@@ -69,12 +91,21 @@ spec:
     driverName: saunafs.csi.saunafs-operator.io
     image: ghcr.io/henres/saunafs-container/saunafs-client:latest
   goals:
+    # EC goal for maximum efficiency (6 CS required).
     - id: 10
       name: ec_4_2
       ec:
         dataParts: 4
         parityParts: 2
       default: true
+    # Node-spread goal: 3 copies, one per physical node (pin by label).
+    - id: 11
+      name: node_spread
+      replication: 3
+      nodeLabels:
+        - worker1
+        - worker2
+        - worker3
   interface:
     enabled: true
     image: ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest

@@ -17,17 +17,15 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"net/http"
-	"sort"
 	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -35,10 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -49,8 +43,7 @@ import (
 // SaunaFSClusterReconciler reconciles a SaunaFSCluster object
 type SaunaFSClusterReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	RestConfig *rest.Config // required for pod exec (HA promotion)
+	Scheme *runtime.Scheme
 }
 
 // HA labels and lease constants.
@@ -60,23 +53,30 @@ const (
 	// matches this label so traffic always reaches the active pod.
 	labelActiveMaster = "saunafs.io/active-master"
 
-	// labelActiveMaster is set to "true" on the pod currently serving as master.
+	// leaseDuration is how long a pod's Lease is valid without renewal.
+	// When the holder dies or is isolated, after this period a shadow can
+	// take over.  Keep it short enough for fast failover, long enough to
+	// survive transient API-server hiccups (e.g. leader election).
+	leaseDuration = 30 * time.Second
 
-	// leaseDuration is how long the operator considers a Lease valid without renewal.
-	leaseDuration = 15 * time.Second
+	// leaseRenewInterval is how often the sidecar renews the Lease.
+	// Must be well below leaseDuration.
+	leaseRenewInterval = 10 * time.Second
 
-	// leaseRenewInterval is how often the operator renews the Lease for a healthy active master.
-	leaseRenewInterval = 5 * time.Second
+	// leaseObserveInterval is how often the operator observes the Lease to
+	// sync the Service selector and status.  It does NOT renew the Lease —
+	// that is the sidecar's responsibility.
+	leaseObserveInterval = 5 * time.Second
 )
 
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=daemonsets;statefulsets;deployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=services;persistentvolumeclaims;configmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=services;persistentvolumeclaims;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -102,6 +102,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		{"migrate legacy master objects", r.migrateMasterToStatefulSet},
 		{"master statefulset", r.reconcileMasterStatefulSet},
 		{"master service", r.reconcileMasterService},
+		{"master ha rbac", r.reconcileMasterHARBAC},
 		{"master ha", r.reconcileMasterHA},
 		{"chunk servers", r.reconcileChunkServers},
 		{"metaloggers", r.reconcileMetaloggers},
@@ -151,10 +152,10 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// When shadow HA is configured, requeue regularly so the operator can renew
-	// the Lease and detect master failures without waiting for a watch event.
+	// When shadow HA is configured, requeue regularly so the operator can observe
+	// Lease changes and sync Service selector / status without waiting for a watch event.
 	if cluster.Spec.Shadow != nil && reconcileErr == nil {
-		return ctrl.Result{RequeueAfter: leaseRenewInterval}, nil
+		return ctrl.Result{RequeueAfter: leaseObserveInterval}, nil
 	}
 
 	return ctrl.Result{}, reconcileErr
@@ -1438,13 +1439,12 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 	}
 
 	// ── init-config command ───────────────────────────────────────────────────
-	// All pods (including pod-0) start as shadow by default.
-	// The operator promotes whichever pod should be master by writing a
-	// .promote sentinel on its PVC and sending SIGTERM.  The wrapper script
-	// (masterRunCmd) detects the sentinel and starts sfsmaster as master.
-	// The init-container must NOT remove the .promote file — if the operator
-	// wrote it just before the pod restarted, it must survive to be consumed
-	// by the wrapper script.
+	// Each pod reads the HA Lease to determine whether it should start as master
+	// or shadow.  If it holds the Lease (holderIdentity == pod name) it starts
+	// as master; otherwise it starts as shadow pointing at the master Service.
+	// On the very first bootstrap (empty Lease / no holder) every pod defaults
+	// to shadow — the sidecar of the first pod to acquire the Lease will kill
+	// sfsmaster so it restarts as master via this init-container logic.
 	goalsCmd := ""
 	goalsVolume := []corev1.Volume{}
 	goalsMounts := []corev1.VolumeMount{}
@@ -1467,45 +1467,176 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 `
 	}
 
+	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
+	saName := fmt.Sprintf("%s-master", cluster.Name)
+
+	// init-config: read Lease → decide master or shadow personality.
+	// Uses wget (available in the saunafs-master image) to call the kube API.
+	// Falls back to shadow if HA is not configured (no Lease name injected).
 	initConfigCmd := fmt.Sprintf(`mkdir -p /etc/saunafs /var/lib/saunafs
 cp -r /usr/share/doc/saunafs-master/examples/. /etc/saunafs/
-%ssed -i 's/^# *PERSONALITY *= *.*/PERSONALITY = shadow/' /etc/saunafs/sfsmaster.cfg
-grep -q "^PERSONALITY" /etc/saunafs/sfsmaster.cfg || echo "PERSONALITY = shadow" >> /etc/saunafs/sfsmaster.cfg
-sed -i 's/^# *MASTER_HOST *= *sfsmaster/MASTER_HOST = %s/' /etc/saunafs/sfsmaster.cfg
-grep -q "^MASTER_HOST" /etc/saunafs/sfsmaster.cfg || echo "MASTER_HOST = %s" >> /etc/saunafs/sfsmaster.cfg
-grep -q "^MASTER_PORT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_PORT = 9419" >> /etc/saunafs/sfsmaster.cfg
-grep -q "^MASTER_RECONNECTION_DELAY" /etc/saunafs/sfsmaster.cfg || echo "MASTER_RECONNECTION_DELAY = 5" >> /etc/saunafs/sfsmaster.cfg
-grep -q "^MASTER_TIMEOUT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_TIMEOUT = 60" >> /etc/saunafs/sfsmaster.cfg`,
-		goalsCmd, masterHost, masterHost)
+%s
+# ── Determine personality via HA Lease ───────────────────────────────────────
+LEASE_NAME="%s"
+MY_POD_NAME="${POD_NAME}"
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+APISERVER=https://kubernetes.default.svc
+LEASE_URL="${APISERVER}/apis/coordination.k8s.io/v1/namespaces/${NS}/leases/${LEASE_NAME}"
 
-	initMetaCmd := "cp -n /opt/saunafs/templates/metadata.sfs.empty /var/lib/saunafs/metadata.sfs 2>/dev/null || true"
+HOLDER=""
+LEASE_JSON=$(wget --ca-certificate=${CA} \
+  --header="Authorization: Bearer ${TOKEN}" \
+  -qO- "${LEASE_URL}" 2>/dev/null) && true
+if [ -n "${LEASE_JSON}" ]; then
+  # Extract holderIdentity with a portable sed expression
+  HOLDER=$(printf '%%s' "${LEASE_JSON}" | sed 's/.*"holderIdentity":"\([^"]*\)".*/\1/;t;s/.*//')
+fi
 
-	// ── Wrapper script (all pods) ─────────────────────────────────────────────
-	// All pods start with PERSONALITY=shadow from the init-container.
-	// The operator promotes a pod by writing .promote to its PVC and sending
-	// SIGTERM.  On the next start the wrapper detects the sentinel, patches the
-	// config to PERSONALITY=master, removes shadow settings, then hands off to
-	// the standard start script.
-	masterRunCmd := `
-# Always remove the lock file before starting.  The startup script calls
-# sfsmetarestore -a when a lock is present, which fails for shadow nodes
-# (they have no changelogs to replay).  Removing it here is safe:
-#   - Shadow restart: nothing to restore; sfsmaster will reconnect and sync.
-#   - Promoted master: we sent SIGTERM cleanly, so metadata was flushed; no
-#     changelog replay needed either.
-rm -f /var/lib/saunafs/metadata.sfs.lock
-
-if [ -f /var/lib/saunafs/.promote ]; then
-  echo "[ha] promotion sentinel found – starting as master"
-  rm -f /var/lib/saunafs/.promote
-  sed -i 's/^PERSONALITY = shadow/PERSONALITY = master/' /etc/saunafs/sfsmaster.cfg
+if [ "${HOLDER}" = "${MY_POD_NAME}" ]; then
+  echo "[ha] I am the Lease holder — starting as master"
+  sed -i 's/^# *PERSONALITY *= *.*/PERSONALITY = master/' /etc/saunafs/sfsmaster.cfg
+  grep -q "^PERSONALITY" /etc/saunafs/sfsmaster.cfg || echo "PERSONALITY = master" >> /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_HOST/d' /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_PORT/d' /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_RECONNECTION_DELAY/d' /etc/saunafs/sfsmaster.cfg
   sed -i '/^MASTER_TIMEOUT/d' /etc/saunafs/sfsmaster.cfg
-fi
+else
+  echo "[ha] Not the Lease holder (holder='${HOLDER}') — starting as shadow"
+  sed -i 's/^# *PERSONALITY *= *.*/PERSONALITY = shadow/' /etc/saunafs/sfsmaster.cfg
+  grep -q "^PERSONALITY" /etc/saunafs/sfsmaster.cfg || echo "PERSONALITY = shadow" >> /etc/saunafs/sfsmaster.cfg
+  sed -i 's/^# *MASTER_HOST *= *sfsmaster/MASTER_HOST = %s/' /etc/saunafs/sfsmaster.cfg
+  grep -q "^MASTER_HOST" /etc/saunafs/sfsmaster.cfg || echo "MASTER_HOST = %s" >> /etc/saunafs/sfsmaster.cfg
+  grep -q "^MASTER_PORT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_PORT = 9419" >> /etc/saunafs/sfsmaster.cfg
+  grep -q "^MASTER_RECONNECTION_DELAY" /etc/saunafs/sfsmaster.cfg || echo "MASTER_RECONNECTION_DELAY = 5" >> /etc/saunafs/sfsmaster.cfg
+  grep -q "^MASTER_TIMEOUT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_TIMEOUT = 60" >> /etc/saunafs/sfsmaster.cfg
+fi`,
+		goalsCmd, leaseName, masterHost, masterHost)
+
+	initMetaCmd := "cp -n /opt/saunafs/templates/metadata.sfs.empty /var/lib/saunafs/metadata.sfs 2>/dev/null || true"
+
+	// ── Main container wrapper script ─────────────────────────────────────────
+	// Simpler than before: personality is already set by the init-container.
+	// We only remove the lock file (safe on both master and shadow restarts).
+	masterRunCmd := `
+# Always remove the lock file before starting.
+rm -f /var/lib/saunafs/metadata.sfs.lock
 exec /saunafs-master.start.sh
 `
+
+	// ── Sidecar script ────────────────────────────────────────────────────────
+	// Two modes depending on whether this pod holds the Lease:
+	//   - Holder: renew every leaseRenewInterval. If renewal fails or another
+	//     pod has taken over, kill sfsmaster → pod restarts → init-container
+	//     re-reads Lease → starts as shadow.
+	//   - Non-holder (shadow): poll every 5s. If Lease is expired, attempt an
+	//     atomic compare-and-swap PATCH (using resourceVersion). On success,
+	//     kill sfsmaster → pod restarts → init-container → starts as master.
+	sidecarCmd := fmt.Sprintf(`
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+APISERVER=https://kubernetes.default.svc
+LEASE_NAME="%s"
+MY_POD="${POD_NAME}"
+LEASE_URL="${APISERVER}/apis/coordination.k8s.io/v1/namespaces/${NS}/leases/${LEASE_NAME}"
+RENEW_INTERVAL=%d
+OBSERVE_INTERVAL=%d
+LEASE_DURATION=%d
+
+# Helper: GET Lease JSON
+get_lease() {
+  wget --ca-certificate=${CA} \
+    --header="Authorization: Bearer ${TOKEN}" \
+    -qO- "${LEASE_URL}" 2>/dev/null
+}
+
+# Helper: PATCH Lease (merge-patch)
+patch_lease() {
+  wget --ca-certificate=${CA} \
+    --header="Authorization: Bearer ${TOKEN}" \
+    --header="Content-Type: application/merge-patch+json" \
+    --method=PATCH \
+    --body-data="$1" \
+    -qO- "${LEASE_URL}" 2>/dev/null
+}
+
+# Helper: extract string field from JSON (no jq, pure sed)
+# Handles both "key":"value" and "key": "value" (with optional space).
+# sed processes line-by-line; we filter blank lines and take the first match.
+json_field() {
+  printf '%%s' "$1" | sed "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/;t;s/.*//" | grep -v "^$" | head -1
+}
+json_int() {
+  printf '%%s' "$1" | sed "s/.*\"$2\": *\([0-9]*\).*/\1/;t;s/.*//" | grep -v "^$" | head -1
+}
+
+echo "[ha-sidecar] starting, pod=${MY_POD}"
+
+while true; do
+  LEASE=$(get_lease)
+  if [ -z "${LEASE}" ]; then
+    echo "[ha-sidecar] could not read Lease, sleeping"
+    sleep ${OBSERVE_INTERVAL}
+    continue
+  fi
+
+  HOLDER=$(json_field "${LEASE}" "holderIdentity")
+  RES_VER=$(json_field "${LEASE}" "resourceVersion")
+
+  if [ "${HOLDER}" = "${MY_POD}" ]; then
+    # ── I am the holder: renew ──────────────────────────────────────────────
+    NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)
+    BODY="{\"spec\":{\"holderIdentity\":\"${MY_POD}\",\"renewTime\":\"${NOW}\",\"leaseDurationSeconds\":${LEASE_DURATION}}}"
+    RESULT=$(patch_lease "${BODY}")
+    NEW_HOLDER=$(json_field "${RESULT}" "holderIdentity")
+    if [ "${NEW_HOLDER}" != "${MY_POD}" ]; then
+      echo "[ha-sidecar] lost Lease (holder is now '${NEW_HOLDER}'), restarting as shadow"
+      kill $(pgrep sfsmaster) 2>/dev/null || true
+      exit 0
+    fi
+    sleep ${RENEW_INTERVAL}
+  else
+    # ── I am a shadow: watch for Lease expiry ───────────────────────────────
+    RENEW_TIME=$(json_field "${LEASE}" "renewTime")
+    if [ -n "${RENEW_TIME}" ]; then
+      # Convert renewTime to epoch seconds (busybox date supports this format)
+      RENEW_EPOCH=$(date -u -d "${RENEW_TIME}" +%%s 2>/dev/null || echo 0)
+      NOW_EPOCH=$(date -u +%%s)
+      AGE=$((NOW_EPOCH - RENEW_EPOCH))
+      if [ ${AGE} -lt ${LEASE_DURATION} ]; then
+        # Lease is fresh — nothing to do
+        sleep ${OBSERVE_INTERVAL}
+        continue
+      fi
+      echo "[ha-sidecar] Lease expired (age=${AGE}s), attempting acquisition"
+    else
+      # No renewTime → brand-new empty Lease — try to acquire
+      echo "[ha-sidecar] Lease has no renewTime, attempting acquisition"
+    fi
+
+    # Atomic CAS: PATCH only if resourceVersion matches
+    NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)
+    CAS_BODY="{\"metadata\":{\"resourceVersion\":\"${RES_VER}\"},\"spec\":{\"holderIdentity\":\"${MY_POD}\",\"acquireTime\":\"${NOW}\",\"renewTime\":\"${NOW}\",\"leaseDurationSeconds\":${LEASE_DURATION}}}"
+    CAS_RESULT=$(patch_lease "${CAS_BODY}")
+    NEW_HOLDER=$(json_field "${CAS_RESULT}" "holderIdentity")
+    if [ "${NEW_HOLDER}" = "${MY_POD}" ]; then
+      echo "[ha-sidecar] acquired Lease! restarting as master"
+      kill $(pgrep sfsmaster) 2>/dev/null || true
+      exit 0
+    else
+      echo "[ha-sidecar] acquisition lost race (holder='${NEW_HOLDER}'), continuing as shadow"
+    fi
+    sleep ${OBSERVE_INTERVAL}
+  fi
+done
+`,
+		leaseName,
+		int(leaseRenewInterval.Seconds()),
+		int(leaseObserveInterval.Seconds()),
+		int(leaseDuration.Seconds()),
+	)
 
 	cfgVolume := corev1.Volume{
 		Name:         "saunafs-cfg",
@@ -1530,6 +1661,27 @@ exec /saunafs-master.start.sh
 	// per-ordinal resource overrides (requires a future operator enhancement).
 	resources := cluster.Spec.Master.Resources
 
+	// POD_NAME env var is injected via the downward API so both init-containers
+	// and the sidecar know their own pod name without kubectl.
+	podNameEnv := corev1.EnvVar{
+		Name: "POD_NAME",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+		},
+	}
+
+	// Only inject sidecar + RBAC machinery when HA (shadow) is configured.
+	var sidecarContainers []corev1.Container
+	if cluster.Spec.Shadow != nil {
+		sidecarContainers = append(sidecarContainers, corev1.Container{
+			Name:            "ha-sidecar",
+			Image:           image,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         []string{"sh", "-c", sidecarCmd},
+			Env:             []corev1.EnvVar{podNameEnv},
+		})
+	}
+
 	desired := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{Name: stsName, Namespace: cluster.Namespace},
 		Spec: appsv1.StatefulSetSpec{
@@ -1539,9 +1691,10 @@ exec /saunafs-master.start.sh
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{
-					NodeSelector: cluster.Spec.Master.NodeSelector,
-					Tolerations:  cluster.Spec.Master.Tolerations,
-					Volumes:      volumes,
+					ServiceAccountName: saName,
+					NodeSelector:       cluster.Spec.Master.NodeSelector,
+					Tolerations:        cluster.Spec.Master.Tolerations,
+					Volumes:            volumes,
 					InitContainers: []corev1.Container{
 						{
 							Name:            "init-config",
@@ -1549,6 +1702,7 @@ exec /saunafs-master.start.sh
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command:         []string{"sh", "-c", initConfigCmd},
 							VolumeMounts:    initConfigVolMounts,
+							Env:             []corev1.EnvVar{podNameEnv},
 						},
 						{
 							Name:            "init-metadata",
@@ -1558,7 +1712,7 @@ exec /saunafs-master.start.sh
 							VolumeMounts:    []corev1.VolumeMount{dataMount},
 						},
 					},
-					Containers: []corev1.Container{
+					Containers: append([]corev1.Container{
 						{
 							Name:            "saunafs-master",
 							Image:           image,
@@ -1568,7 +1722,7 @@ exec /saunafs-master.start.sh
 							Resources:       resources,
 							VolumeMounts:    []corev1.VolumeMount{cfgMount, dataMount},
 						},
-					},
+					}, sidecarContainers...),
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
@@ -1593,25 +1747,21 @@ exec /saunafs-master.start.sh
 	return r.createOrUpdateStatefulSet(ctx, desired)
 }
 
-// ── Master HA (Lease + failover) ─────────────────────────────────────────────
+// ── Master HA (Lease observer) ───────────────────────────────────────────────
 
-// reconcileMasterHA implements the leader-election loop for the master role:
+// reconcileMasterHA is a passive observer of the HA Lease.
 //
-//  1. Read or create the Lease "<cluster>-master-ha".
-//  2. If the current active pod (status.ActiveMaster) is Running+Ready, renew
-//     the Lease and return.
-//  3. Otherwise (no active master known, or the recorded pod is gone/not-ready):
-//     a. If pod-0 (primary) is Running+Ready → make it active.
-//     b. Else if any shadow pods (ordinal > 0) are Running+Ready → pick the
-//     lowest ordinal, write the .promote sentinel, make it active.
-//  4. Update the "active-master=true" label on pods and the master Service
-//     selector accordingly.
-//  5. Clear the label from all other master/shadow pods.
-//  6. Update status.ActiveMaster and status.ReadyShadows.
+// The election is driven entirely by the pod sidecars: each sidecar either
+// renews its own Lease (if it is the holder) or watches for expiry and
+// attempts an atomic compare-and-swap PATCH to acquire the Lease.
 //
-// The operator requeues every leaseRenewInterval seconds so the Lease is kept
-// fresh.  A stale Lease (> leaseDuration) is treated the same as a missing one
-// and triggers a new election.
+// The operator's only responsibilities here are:
+//  1. Bootstrap: create an empty Lease (no holderIdentity) if none exists.
+//  2. Observe: read holderIdentity and sync the Service selector + pod labels.
+//  3. Status: update status.ActiveMaster and status.ReadyShadows.
+//
+// The operator never renews nor acquires the Lease itself.
+// It requeues every leaseObserveInterval so changes are picked up promptly.
 func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
 	logger := log.FromContext(ctx)
 
@@ -1626,180 +1776,176 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluste
 	}
 
 	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
-
-	// ── Gather all pods of the master StatefulSet ────────────────────────────
-	allCandidates, err := r.listAllMasterStatefulSetPods(ctx, cluster)
-	if err != nil {
-		return err
-	}
-	// Sort by name (= by ordinal) so election is deterministic.
-	sort.Slice(allCandidates, func(i, j int) bool {
-		return allCandidates[i].Name < allCandidates[j].Name
-	})
-
-	// ── Determine current active pod ─────────────────────────────────────────
-	// The active pod is tracked in cluster.Status.ActiveMaster.  We also accept
-	// a pod that carries the live active-master label in case the status write
-	// was lost across a controller restart.
-	currentActive := cluster.Status.ActiveMaster
-	activeRunning := false
-	for _, p := range allCandidates {
-		isActive := (p.Name == currentActive) || (p.Labels[labelActiveMaster] == "true")
-		if isActive && isPodRunningReady(&p) {
-			activeRunning = true
-			if p.Name != currentActive {
-				cluster.Status.ActiveMaster = p.Name
-				currentActive = p.Name
-			}
-			break
-		}
-	}
-
-	// ── Lease management ─────────────────────────────────────────────────────
-	holderIdentity := currentActive
-	now := metav1.NewMicroTime(time.Now())
+	leaseNN := types.NamespacedName{Name: leaseName, Namespace: cluster.Namespace}
 	durationSec := int32(leaseDuration.Seconds())
 
+	// ── Bootstrap: create empty Lease if none exists ─────────────────────────
 	lease := &coordinationv1.Lease{}
-	leaseNN := types.NamespacedName{Name: leaseName, Namespace: cluster.Namespace}
-	leaseExists := true
 	if err := r.Get(ctx, leaseNN, lease); err != nil {
 		if !errors.IsNotFound(err) {
 			return err
 		}
-		leaseExists = false
-	}
-
-	if activeRunning {
-		// Active master is healthy — just renew the Lease. No failback preemption.
-		if !leaseExists {
-			lease = &coordinationv1.Lease{
-				ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: cluster.Namespace},
-				Spec: coordinationv1.LeaseSpec{
-					HolderIdentity:       &holderIdentity,
-					LeaseDurationSeconds: &durationSec,
-					RenewTime:            &now,
-					AcquireTime:          &now,
-					LeaseTransitions:     new(int32),
-				},
-			}
-			if err := ctrl.SetControllerReference(cluster, lease, r.Scheme); err != nil {
-				return err
-			}
-			if err := r.Create(ctx, lease); err != nil && !errors.IsAlreadyExists(err) {
-				return err
-			}
-		} else {
-			lease.Spec.HolderIdentity = &holderIdentity
-			lease.Spec.RenewTime = &now
-			lease.Spec.LeaseDurationSeconds = &durationSec
-			if err := r.Update(ctx, lease); err != nil {
-				return err
-			}
+		// Lease does not exist yet — create it with no holderIdentity.
+		// The sidecar of the first ready pod will acquire it.
+		empty := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: cluster.Namespace},
+			Spec: coordinationv1.LeaseSpec{
+				LeaseDurationSeconds: &durationSec,
+			},
 		}
+		if err := ctrl.SetControllerReference(cluster, empty, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Create(ctx, empty); err != nil && !errors.IsAlreadyExists(err) {
+			return err
+		}
+		logger.Info("Created empty HA Lease", "lease", leaseName)
 		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
 		return nil
 	}
 
-	// ── Election: no active master or it is gone/not-ready ───────────────────
-	// Sticky election: we elect the ready pod with the lowest ordinal.
-	// No preemption — a pod that comes back after a failover simply joins as
-	// shadow (its init-container starts it with PERSONALITY=shadow).
-	logger.Info("Active master not ready, running HA election",
-		"cluster", cluster.Name, "previous", currentActive)
+	// ── Read holderIdentity ───────────────────────────────────────────────────
+	var holder string
+	if lease.Spec.HolderIdentity != nil {
+		holder = *lease.Spec.HolderIdentity
+	}
 
-	// Collect all Running-phase pods — we wait if any is Running but not yet
-	// Ready (still initialising), to avoid promoting a shadow unnecessarily.
-	anyRunningNotReady := false
-	var readyCandidates []corev1.Pod
-	for _, p := range allCandidates {
-		if isPodRunningReady(&p) {
-			readyCandidates = append(readyCandidates, p)
-		} else if p.Status.Phase == corev1.PodRunning {
-			anyRunningNotReady = true
+	if holder == "" {
+		// No holder yet — sidecars are competing; nothing to sync.
+		logger.Info("HA Lease has no holder yet", "lease", leaseName)
+		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
+		return nil
+	}
+
+	// ── Check whether the Lease is still fresh ───────────────────────────────
+	leaseExpired := false
+	if lease.Spec.RenewTime != nil {
+		age := time.Since(lease.Spec.RenewTime.Time)
+		if age > leaseDuration {
+			leaseExpired = true
+			logger.Info("HA Lease is expired", "holder", holder, "age", age.Round(time.Second))
 		}
 	}
-
-	if anyRunningNotReady && len(readyCandidates) == 0 {
-		// A pod is starting up — wait a few seconds rather than electing nothing.
-		logger.Info("Pod is starting up, waiting for Ready before electing")
+	if leaseExpired {
+		// Sidecar has not renewed in time; clear our status until a new holder
+		// acquires the Lease.
+		cluster.Status.ActiveMaster = ""
 		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
 		return nil
 	}
 
-	var elected *corev1.Pod
-	if len(readyCandidates) > 0 {
-		elected = &readyCandidates[0] // lowest ordinal wins
-	}
+	// ── Sync Service selector + pod labels ───────────────────────────────────
+	logger.Info("HA Lease holder", "pod", holder)
 
-	if elected == nil {
-		logger.Info("No ready pod found, waiting")
-		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
-		return nil
+	allPods, err := r.listAllMasterStatefulSetPods(ctx, cluster)
+	if err != nil {
+		return err
 	}
-
-	// Promote the elected pod: write the sentinel file then send SIGTERM so
-	// sfsmaster exits and restarts via the wrapper script as master.
-	logger.Info("Promoting pod to master", "pod", elected.Name)
-	promoteCmd := []string{"sh", "-c",
-		"touch /var/lib/saunafs/.promote && kill -TERM $(cat /var/run/sfsmaster.pid 2>/dev/null || pgrep sfsmaster) 2>/dev/null || true",
-	}
-	if err := r.execInPod(ctx, cluster.Namespace, elected.Name, "saunafs-master", promoteCmd); err != nil {
-		logger.Info("Promotion exec failed (will retry)", "pod", elected.Name, "err", err.Error())
-		cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
-		return nil
-	}
-
-	// ── Flip labels ───────────────────────────────────────────────────────────
-	newActive := elected.Name
-	for i := range allCandidates {
-		wantActive := allCandidates[i].Name == newActive
-		if err := r.setPodActiveMasterLabel(ctx, &allCandidates[i], wantActive); err != nil {
-			logger.Error(err, "Failed to set active-master label", "pod", allCandidates[i].Name)
+	for i := range allPods {
+		wantActive := allPods[i].Name == holder
+		if err := r.setPodActiveMasterLabel(ctx, &allPods[i], wantActive); err != nil {
+			logger.Error(err, "Failed to set active-master label", "pod", allPods[i].Name)
 		}
 	}
 
-	// ── Update master Service selector ───────────────────────────────────────
-	if err := r.setMasterServiceSelector(ctx, cluster, newActive); err != nil {
+	if err := r.setMasterServiceSelector(ctx, cluster, holder); err != nil {
 		return err
 	}
 
-	// ── Update Lease ─────────────────────────────────────────────────────────
-	transitions := int32(1)
-	if leaseExists && lease.Spec.LeaseTransitions != nil {
-		transitions = *lease.Spec.LeaseTransitions + 1
+	cluster.Status.ActiveMaster = holder
+	cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
+	return nil
+}
+
+// reconcileMasterHARBAC ensures the ServiceAccount, Role, and RoleBinding that
+// allow master pods to read/patch the HA Lease exist in the cluster namespace.
+func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+	if cluster.Spec.Shadow == nil {
+		return nil
 	}
-	if !leaseExists {
-		lease = &coordinationv1.Lease{
-			ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: cluster.Namespace},
-			Spec: coordinationv1.LeaseSpec{
-				HolderIdentity:       &newActive,
-				LeaseDurationSeconds: &durationSec,
-				RenewTime:            &now,
-				AcquireTime:          &now,
-				LeaseTransitions:     &transitions,
-			},
-		}
-		if err := ctrl.SetControllerReference(cluster, lease, r.Scheme); err != nil {
+
+	saName := fmt.Sprintf("%s-master", cluster.Name)
+	roleName := fmt.Sprintf("%s-master-ha", cluster.Name)
+	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
+
+	// ── ServiceAccount ────────────────────────────────────────────────────────
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: cluster.Namespace},
+	}
+	if err := ctrl.SetControllerReference(cluster, sa, r.Scheme); err != nil {
+		return err
+	}
+	existingSA := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, types.NamespacedName{Name: saName, Namespace: cluster.Namespace}, existingSA); err != nil {
+		if client.IgnoreNotFound(err) != nil {
 			return err
 		}
-		if err := r.Create(ctx, lease); err != nil && !errors.IsAlreadyExists(err) {
-			return err
-		}
-	} else {
-		lease.Spec.HolderIdentity = &newActive
-		lease.Spec.RenewTime = &now
-		lease.Spec.AcquireTime = &now
-		lease.Spec.LeaseDurationSeconds = &durationSec
-		lease.Spec.LeaseTransitions = &transitions
-		if err := r.Update(ctx, lease); err != nil {
+		if err := r.Create(ctx, sa); err != nil && !errors.IsAlreadyExists(err) {
 			return err
 		}
 	}
 
-	cluster.Status.ActiveMaster = newActive
-	cluster.Status.ReadyShadows = r.countReadyShadows(ctx, cluster)
-	logger.Info("HA election complete", "activeMaster", newActive)
+	// ── Role ─────────────────────────────────────────────────────────────────
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: cluster.Namespace},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups:     []string{"coordination.k8s.io"},
+				Resources:     []string{"leases"},
+				ResourceNames: []string{leaseName},
+				Verbs:         []string{"get", "update", "patch"},
+			},
+		},
+	}
+	if err := ctrl.SetControllerReference(cluster, role, r.Scheme); err != nil {
+		return err
+	}
+	existingRole := &rbacv1.Role{}
+	if err := r.Get(ctx, types.NamespacedName{Name: roleName, Namespace: cluster.Namespace}, existingRole); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := r.Create(ctx, role); err != nil && !errors.IsAlreadyExists(err) {
+			return err
+		}
+	} else {
+		existingRole.Rules = role.Rules
+		if err := r.Update(ctx, existingRole); err != nil {
+			return err
+		}
+	}
+
+	// ── RoleBinding ───────────────────────────────────────────────────────────
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: cluster.Namespace},
+		Subjects: []rbacv1.Subject{
+			{Kind: "ServiceAccount", Name: saName, Namespace: cluster.Namespace},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     roleName,
+		},
+	}
+	if err := ctrl.SetControllerReference(cluster, rb, r.Scheme); err != nil {
+		return err
+	}
+	existingRB := &rbacv1.RoleBinding{}
+	if err := r.Get(ctx, types.NamespacedName{Name: roleName, Namespace: cluster.Namespace}, existingRB); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		if err := r.Create(ctx, rb); err != nil && !errors.IsAlreadyExists(err) {
+			return err
+		}
+	} else {
+		existingRB.Subjects = rb.Subjects
+		existingRB.RoleRef = rb.RoleRef
+		if err := r.Update(ctx, existingRB); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -1919,48 +2065,6 @@ func isPodRunningReady(pod *corev1.Pod) bool {
 	return false
 }
 
-// execInPod runs a command inside a running pod container via the Kubernetes
-// exec subresource. stdout/stderr are captured and returned in the error when
-// the command exits non-zero.
-func (r *SaunaFSClusterReconciler) execInPod(ctx context.Context, namespace, podName, containerName string, cmd []string) error {
-	if r.RestConfig == nil {
-		return fmt.Errorf("RestConfig not set on reconciler, cannot exec into pod %s", podName)
-	}
-
-	clientset, err := kubernetes.NewForConfig(r.RestConfig)
-	if err != nil {
-		return fmt.Errorf("create clientset: %w", err)
-	}
-
-	req := clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(namespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: containerName,
-			Command:   cmd,
-			Stdout:    true,
-			Stderr:    true,
-		}, clientgoscheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(r.RestConfig, http.MethodPost, req.URL())
-	if err != nil {
-		return fmt.Errorf("create SPDY executor: %w", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-	if err != nil {
-		return fmt.Errorf("exec %v in %s: %w\nstdout: %s\nstderr: %s",
-			cmd, podName, err, stdout.String(), stderr.String())
-	}
-	return nil
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -1968,9 +2072,9 @@ func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
-		// Note: we intentionally do NOT watch the HA Lease here.
-		// The operator renews the Lease every leaseRenewInterval via RequeueAfter.
-		// Watching Lease changes would create a feedback loop: each renewal would
-		// trigger an immediate reconcile, doubling the reconcile rate.
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&rbacv1.Role{}).
+		Owns(&rbacv1.RoleBinding{}).
+		Owns(&coordinationv1.Lease{}).
 		Complete(r)
 }

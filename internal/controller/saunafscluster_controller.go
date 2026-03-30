@@ -1490,8 +1490,10 @@ LEASE_JSON=$(wget --ca-certificate=${CA} \
   --header="Authorization: Bearer ${TOKEN}" \
   -qO- "${LEASE_URL}" 2>/dev/null) && true
 if [ -n "${LEASE_JSON}" ]; then
-  # Extract holderIdentity with a portable sed expression
-  HOLDER=$(printf '%%s' "${LEASE_JSON}" | sed 's/.*"holderIdentity":"\([^"]*\)".*/\1/;t;s/.*//')
+  # Extract holderIdentity: API returns "key": "value" (space after colon).
+  # The managedFields section also contains "f:holderIdentity":{} (no value),
+  # which the pattern correctly ignores because it has no quoted string value.
+  HOLDER=$(printf '%%s' "${LEASE_JSON}" | sed 's/.*"holderIdentity": *"\([^"]*\)".*/\1/;t;s/.*//' | grep -v '^$' | head -1)
 fi
 
 if [ "${HOLDER}" = "${MY_POD_NAME}" ]; then
@@ -1572,6 +1574,17 @@ json_int() {
   printf '%%s' "$1" | sed "s/.*\"$2\": *\([0-9]*\).*/\1/;t;s/.*//" | grep -v "^$" | head -1
 }
 
+# Helper: delete this pod (triggers full restart including init-containers)
+delete_self() {
+  POD_URL="${APISERVER}/api/v1/namespaces/${NS}/pods/${MY_POD}"
+  wget --ca-certificate=${CA} \
+    --header="Authorization: Bearer ${TOKEN}" \
+    --method=DELETE \
+    -qO- "${POD_URL}" 2>/dev/null || true
+  # If delete succeeded the pod will be evicted; sleep to avoid tight loop
+  sleep 60
+}
+
 echo "[ha-sidecar] starting, pod=${MY_POD}"
 
 while true; do
@@ -1592,9 +1605,8 @@ while true; do
     RESULT=$(patch_lease "${BODY}")
     NEW_HOLDER=$(json_field "${RESULT}" "holderIdentity")
     if [ "${NEW_HOLDER}" != "${MY_POD}" ]; then
-      echo "[ha-sidecar] lost Lease (holder is now '${NEW_HOLDER}'), restarting as shadow"
-      kill $(pgrep sfsmaster) 2>/dev/null || true
-      exit 0
+      echo "[ha-sidecar] lost Lease (holder is now '${NEW_HOLDER}'), deleting pod to restart as shadow"
+      delete_self
     fi
     sleep ${RENEW_INTERVAL}
   else
@@ -1622,9 +1634,8 @@ while true; do
     CAS_RESULT=$(patch_lease "${CAS_BODY}")
     NEW_HOLDER=$(json_field "${CAS_RESULT}" "holderIdentity")
     if [ "${NEW_HOLDER}" = "${MY_POD}" ]; then
-      echo "[ha-sidecar] acquired Lease! restarting as master"
-      kill $(pgrep sfsmaster) 2>/dev/null || true
-      exit 0
+      echo "[ha-sidecar] acquired Lease! deleting pod to restart as master"
+      delete_self
     else
       echo "[ha-sidecar] acquisition lost race (holder='${NEW_HOLDER}'), continuing as shadow"
     fi
@@ -1691,10 +1702,14 @@ done
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: saName,
-					NodeSelector:       cluster.Spec.Master.NodeSelector,
-					Tolerations:        cluster.Spec.Master.Tolerations,
-					Volumes:            volumes,
+					// shareProcessNamespace allows the ha-sidecar to pgrep/kill
+					// sfsmaster running in the main container, so it can trigger
+					// a pod restart after a Lease transition.
+					ShareProcessNamespace: func() *bool { b := true; return &b }(),
+					ServiceAccountName:    saName,
+					NodeSelector:          cluster.Spec.Master.NodeSelector,
+					Tolerations:           cluster.Spec.Master.Tolerations,
+					Volumes:               volumes,
 					InitContainers: []corev1.Container{
 						{
 							Name:            "init-config",
@@ -1869,8 +1884,17 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
 
 	// ── ServiceAccount ────────────────────────────────────────────────────────
+	// Copy imagePullSecrets from the namespace's default SA so that pods using
+	// this SA can pull images from private registries without manual patching.
+	var pullSecrets []corev1.LocalObjectReference
+	defaultSA := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, types.NamespacedName{Name: "default", Namespace: cluster.Namespace}, defaultSA); err == nil {
+		pullSecrets = defaultSA.ImagePullSecrets
+	}
+
 	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: cluster.Namespace},
+		ObjectMeta:       metav1.ObjectMeta{Name: saName, Namespace: cluster.Namespace},
+		ImagePullSecrets: pullSecrets,
 	}
 	if err := ctrl.SetControllerReference(cluster, sa, r.Scheme); err != nil {
 		return err
@@ -1881,6 +1905,12 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 			return err
 		}
 		if err := r.Create(ctx, sa); err != nil && !errors.IsAlreadyExists(err) {
+			return err
+		}
+	} else {
+		// Always sync imagePullSecrets so they stay up to date if the default SA changes.
+		existingSA.ImagePullSecrets = pullSecrets
+		if err := r.Update(ctx, existingSA); err != nil {
 			return err
 		}
 	}
@@ -1894,6 +1924,14 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 				Resources:     []string{"leases"},
 				ResourceNames: []string{leaseName},
 				Verbs:         []string{"get", "update", "patch"},
+			},
+			{
+				// Allows the sidecar to delete its own pod (triggers full pod
+				// restart including init-containers, which re-reads the Lease
+				// to determine master vs shadow personality).
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"delete"},
 			},
 		},
 	}

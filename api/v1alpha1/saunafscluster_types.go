@@ -366,6 +366,8 @@ type NamedPort struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether all cluster components are reconciled"
 //+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].reason",description="Reason for the current Ready status"
+//+kubebuilder:printcolumn:name="ActiveMaster",type="string",JSONPath=".status.activeMaster",description="Pod currently holding the master Lease"
+//+kubebuilder:printcolumn:name="Shadows",type="integer",JSONPath=".status.readyShadows",description="Number of ready shadow replicas"
 //+kubebuilder:printcolumn:name="ChunkServers",type="integer",JSONPath=".status.readyChunkServers",description="Ready chunk server count"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

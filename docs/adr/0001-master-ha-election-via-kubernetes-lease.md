@@ -159,7 +159,7 @@ The operator's own `ClusterRole` is extended with permissions to manage `Service
 - The sidecar script is non-trivial shell code embedded in a Go string literal, which makes it harder to test in isolation and to read diffs.
 - JSON parsing is done with `sed` (no `jq` available), which is fragile if the Kubernetes API response format changes significantly.
 - The `delete_self()` mechanism relies on Kubernetes recreating the pod (requires the pod to be managed by a StatefulSet with `Always` restart policy). Direct process signalling across containers (e.g., `kill`) was considered but rejected because it requires `shareProcessNamespace` and is less robust across container runtimes.
-- `imagePullSecrets` for the SA `<cluster>-master` must be propagated manually or via operator logic (not yet automated).
+- `imagePullSecrets` for the SA `<cluster>-master` are automatically propagated from the `default` SA in the same namespace on every reconcile.
 
 ---
 

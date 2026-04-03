@@ -23,6 +23,14 @@ spec:
       jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - description: Pod currently holding the master Lease
+      jsonPath: .status.activeMaster
+      name: ActiveMaster
+      type: string
+    - description: Number of ready shadow replicas
+      jsonPath: .status.readyShadows
+      name: Shadows
+      type: integer
     - description: Ready chunk server count
       jsonPath: .status.readyChunkServers
       name: ChunkServers

@@ -827,18 +827,29 @@ func (r *SaunaFSClusterReconciler) reconcileExposeService(ctx context.Context, c
 		})
 	}
 
+	// In HA mode, route only to the active master pod so that external
+	// clients never land on a shadow.  In non-HA mode the broad selector
+	// (all master pods) is fine because there is only one.
+	exposeSelector := map[string]string{
+		"app.kubernetes.io/name":     "saunafs-master",
+		"app.kubernetes.io/instance": cluster.Name,
+	}
+	if cluster.Spec.Shadow != nil {
+		exposeSelector = map[string]string{
+			"app.kubernetes.io/instance": cluster.Name,
+			labelActiveMaster:            "true",
+		}
+	}
+
 	desired := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: cluster.Namespace,
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeNodePort,
-			Selector: map[string]string{
-				"app.kubernetes.io/name":     "saunafs-master",
-				"app.kubernetes.io/instance": cluster.Name,
-			},
-			Ports: servicePorts,
+			Type:     corev1.ServiceTypeNodePort,
+			Selector: exposeSelector,
+			Ports:    servicePorts,
 		},
 	}
 	if err := ctrl.SetControllerReference(cluster, desired, r.Scheme); err != nil {
@@ -1376,24 +1387,29 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 	}
 	totalReplicas := int32(1) + shadowReplicas
 
-	// Storage size & class: use shadow spec if present, else master spec.
+	// Storage size & class: master spec takes priority; shadow spec provides
+	// fallback defaults.  This avoids the shadow config silently overriding
+	// the master's storage class for pod-0.  Because a StatefulSet has a
+	// single VolumeClaimTemplate shared by all pods, both master and shadow
+	// pods will use the same storage class — choose the master's preference.
 	storageSize := resource.MustParse("1Gi")
 	var storageClassName *string
-	if ms := cluster.Spec.Master.MetadataStorage; ms != nil {
-		if !ms.Size.IsZero() {
-			storageSize = ms.Size
-		}
-		if ms.StorageClassName != "" {
-			sc := ms.StorageClassName
-			storageClassName = &sc
-		}
-	}
 	if sh := cluster.Spec.Shadow; sh != nil && sh.MetadataStorage != nil {
 		if !sh.MetadataStorage.Size.IsZero() {
 			storageSize = sh.MetadataStorage.Size
 		}
 		if sh.MetadataStorage.StorageClassName != "" {
 			sc := sh.MetadataStorage.StorageClassName
+			storageClassName = &sc
+		}
+	}
+	// Master spec overrides shadow spec.
+	if ms := cluster.Spec.Master.MetadataStorage; ms != nil {
+		if !ms.Size.IsZero() {
+			storageSize = ms.Size
+		}
+		if ms.StorageClassName != "" {
+			sc := ms.StorageClassName
 			storageClassName = &sc
 		}
 	}
@@ -1916,6 +1932,18 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 	}
 
 	// ── Role ─────────────────────────────────────────────────────────────────
+	// Compute the exact set of pod names the sidecar is allowed to delete.
+	// StatefulSet pod names are deterministic: <cluster>-master-0 .. N-1.
+	var shadowReplicas int32 = 1
+	if cluster.Spec.Shadow != nil && cluster.Spec.Shadow.Replicas != nil {
+		shadowReplicas = *cluster.Spec.Shadow.Replicas
+	}
+	masterStsName := fmt.Sprintf("%s-master", cluster.Name)
+	masterPodNames := make([]string, 0, 1+shadowReplicas)
+	for i := int32(0); i < 1+shadowReplicas; i++ {
+		masterPodNames = append(masterPodNames, fmt.Sprintf("%s-%d", masterStsName, i))
+	}
+
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: cluster.Namespace},
 		Rules: []rbacv1.PolicyRule{
@@ -1929,9 +1957,11 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 				// Allows the sidecar to delete its own pod (triggers full pod
 				// restart including init-containers, which re-reads the Lease
 				// to determine master vs shadow personality).
-				APIGroups: []string{""},
-				Resources: []string{"pods"},
-				Verbs:     []string{"delete"},
+				// Scoped to the master StatefulSet pods only.
+				APIGroups:     []string{""},
+				Resources:     []string{"pods"},
+				ResourceNames: masterPodNames,
+				Verbs:         []string{"delete"},
 			},
 		},
 	}

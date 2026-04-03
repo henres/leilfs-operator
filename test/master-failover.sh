@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/master-failover.sh — SaunaFS master failover scenario
+# test/master-failover.sh — SaunaFS HA master failover scenario
 #
-# Simulates a master failure and validates that the cluster can be recovered
-# using metadata preserved by a metalogger replica.
+# Simulates a master failure and validates that the shadow automatically
+# acquires the Kubernetes Lease and promotes itself to master without any
+# manual intervention.
 #
 # Scenario:
-#   1. Write test data into the SaunaFS filesystem via the NFS gateway.
-#   2. Kill the master (delete its pod, simulating a crash).
-#   3. Rebuild metadata.sfs from the metalogger journal (sfsmetarestore).
-#   4. Replace the master PVC data with the metalogger-rebuilt metadata.
-#   5. Restart the master; verify it comes back Ready.
-#   6. Verify the test data is still readable.
+#   1. Pre-flight: verify cluster is healthy, HA Lease exists and has a holder.
+#   2. Write test data into the SaunaFS filesystem via the NFS gateway.
+#   3. Simulate master failure: cordon the active master pod's node and delete
+#      the pod so the StatefulSet cannot reschedule it immediately.
+#   4. Wait for the shadow to detect the expired Lease and acquire it
+#      (~30 s max).  Verify the Lease holder changes.
+#   5. Uncordon the node so the former master can come back as shadow.
+#   6. Verify the new master pod started with PERSONALITY=master.
+#   7. Verify SaunaFSCluster status.activeMaster is updated.
+#   8. Verify the test data written in step 2 is still readable.
+#   9. Verify the former master restarted as shadow.
 #
 # Prerequisites:
-#   - Kind cluster "saunafs-operator" running with a deployed SaunaFSCluster.
+#   - Kind cluster "saunafs-operator" running with a deployed SaunaFSCluster
+#     that has spec.shadow set (HA mode).
 #   - kubectl context kind-saunafs-operator must be accessible.
-#   - NFS mounted locally OR saunafs-mount available; script uses kubectl exec
-#     into the NFS pod as a proxy to avoid requiring a local NFS mount.
+#   - docker CLI available (used to access NFS via Kind nodes).
 #
 # Usage:
 #   bash test/master-failover.sh
@@ -28,9 +34,9 @@ set -euo pipefail
 KUBE="kubectl --context kind-saunafs-operator"
 NS="default"
 CLUSTER="saunafscluster-sample"
-MASTER_DEPLOY="${CLUSTER}-master"
+MASTER_STS="${CLUSTER}-master"
+LEASE_NAME="${CLUSTER}-master-ha"
 METALOGGER_STS="${CLUSTER}-metalogger"
-METALOGGER_POD="${METALOGGER_STS}-0"
 NFS_DEPLOY="${CLUSTER}-nfs"
 
 RED='\033[0;31m'
@@ -43,7 +49,7 @@ fail() { echo -e "${RED}[FAIL]${NC} $*"; exit 1; }
 step() { echo -e "\n${YELLOW}==> $*${NC}"; }
 
 # ---------------------------------------------------------------------------
-# Helper: exec into a pod (defaulting to first container)
+# Helper: exec into a pod
 # ---------------------------------------------------------------------------
 kexec() {
     local pod=$1; shift
@@ -51,270 +57,186 @@ kexec() {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: wait for a deployment to have all replicas ready
+# Helper: wait for StatefulSet to have all replicas ready
 # ---------------------------------------------------------------------------
-wait_deploy() {
+wait_sts() {
     local name=$1 timeout=${2:-120}
-    echo "    Waiting for deployment/${name} to be ready (timeout ${timeout}s)..."
-    $KUBE rollout status deployment/"$name" -n "$NS" --timeout="${timeout}s"
+    echo "    Waiting for statefulset/${name} to be ready (timeout ${timeout}s)..."
+    $KUBE rollout status statefulset/"$name" -n "$NS" --timeout="${timeout}s"
 }
 
 # ---------------------------------------------------------------------------
-# Helper: get the current master pod name
+# Helper: get the current Lease holder (pod name)
 # ---------------------------------------------------------------------------
-master_pod() {
-    $KUBE get pods -n "$NS" -l "app.kubernetes.io/name=saunafs-master" \
-        --field-selector=status.phase=Running \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+lease_holder() {
+    $KUBE get lease "$LEASE_NAME" -n "$NS" \
+        -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
-# Helper: get the current NFS pod name
+# Helper: get the current Lease renewTime as epoch seconds
 # ---------------------------------------------------------------------------
-nfs_pod() {
-    $KUBE get pods -n "$NS" -l "app.kubernetes.io/name=saunafs-nfs" \
-        --field-selector=status.phase=Running \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+lease_renew_epoch() {
+    local rt
+    rt=$($KUBE get lease "$LEASE_NAME" -n "$NS" \
+        -o jsonpath='{.spec.renewTime}' 2>/dev/null || echo "")
+    if [ -z "$rt" ]; then echo 0; return; fi
+    date -u -d "$rt" +%s 2>/dev/null || echo 0
+}
+
+# ---------------------------------------------------------------------------
+# Helper: get NFS service ClusterIP
+# ---------------------------------------------------------------------------
+nfs_svc_ip() {
+    $KUBE get svc "${CLUSTER}-nfs" -n "$NS" -o jsonpath='{.spec.clusterIP}' 2>/dev/null
 }
 
 # =============================================================================
-step "1. Pre-flight: verify cluster is healthy"
+step "1. Pre-flight: verify cluster is healthy and HA Lease has a holder"
 # =============================================================================
 
-MPOD=$(master_pod)
-[ -n "$MPOD" ] || fail "No running master pod found"
-pass "Master pod: $MPOD"
+HOLDER=$(lease_holder)
+[ -n "$HOLDER" ] || fail "HA Lease '${LEASE_NAME}' has no holder — is HA enabled and cluster healthy?"
+pass "Active master (Lease holder): $HOLDER"
 
 ML_READY=$($KUBE get sts "$METALOGGER_STS" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
 [ "$ML_READY" -ge 1 ] || fail "No metalogger replicas ready (got ${ML_READY})"
 pass "Metalogger replicas ready: $ML_READY"
 
-NPOD=$(nfs_pod)
-[ -n "$NPOD" ] || fail "No running NFS pod found"
-pass "NFS pod: $NPOD"
+NFS_SVC_IP=$(nfs_svc_ip)
+[ -n "$NFS_SVC_IP" ] || fail "NFS service not found"
+pass "NFS service ClusterIP: $NFS_SVC_IP"
+
+# Determine which node the active master pod is on.
+ACTIVE_POD="$HOLDER"
+ACTIVE_NODE=$($KUBE get pod "$ACTIVE_POD" -n "$NS" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+[ -n "$ACTIVE_NODE" ] || fail "Could not determine node for pod ${ACTIVE_POD}"
+pass "Active master pod '${ACTIVE_POD}' is on node '${ACTIVE_NODE}'"
 
 # =============================================================================
-step "2. Write test data into SaunaFS via NFS pod"
+step "2. Write test data into SaunaFS via NFS"
 # =============================================================================
-# The NFS pod has the SaunaFS FSAL but no local FUSE mount; we use the master
-# container directly (it has /var/lib/saunafs but not the FS client). Instead,
-# we exec into a chunkserver which also doesn't have a client. Best approach:
-# exec into the master pod (it has bash + full OS) and use sfsmaster to mount.
-# Simplest alternative: write a sentinel file via the NFS ganesha container
-# which mounts SaunaFS via the FSAL internally. We trigger a file creation via
-# the ganesha control socket, or better — mount NFS inside the Kind node.
-
-# Practical approach: mount NFS inside one of the Kind worker nodes using
-# docker exec (Kind nodes are Docker containers with full OS).
-WORKER_NODE="saunafs-operator-worker"
 TEST_FILE="failover-test-$(date +%s).txt"
 TEST_CONTENT="master-failover-sentinel-$(date -u +%Y%m%dT%H%M%SZ)"
 
-NFS_SVC_IP=$($KUBE get svc "${CLUSTER}-nfs" -n "$NS" -o jsonpath='{.spec.clusterIP}')
-echo "    NFS service ClusterIP: $NFS_SVC_IP"
-
-# Mount NFS inside the control-plane node (has nfs-common) and write the file.
-echo "    Mounting NFS inside Kind control-plane node..."
+echo "    Mounting NFS inside Kind control-plane node and writing test file..."
 docker exec saunafs-operator-control-plane bash -c "
-    apt-get install -y -q nfs-common 2>/dev/null | tail -1 &&
-    mkdir -p /mnt/saunafs-test &&
+    apt-get install -y -q nfs-common 2>/dev/null | tail -1
+    mkdir -p /mnt/saunafs-test
     mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/saunafs-test 2>/dev/null || \
-        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test &&
-    echo '${TEST_CONTENT}' > /mnt/saunafs-test/${TEST_FILE} &&
-    sync &&
-    echo 'Write OK: ' \$(cat /mnt/saunafs-test/${TEST_FILE}) &&
+        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test
+    echo '${TEST_CONTENT}' > /mnt/saunafs-test/${TEST_FILE}
+    sync
+    echo 'Write OK: ' \$(cat /mnt/saunafs-test/${TEST_FILE})
     umount /mnt/saunafs-test
 "
 pass "Test file written: ${TEST_FILE} = '${TEST_CONTENT}'"
 
 # =============================================================================
-step "3. Force-kill the master pod (simulate crash)"
+step "3. Simulate master failure (cordon node + delete pod)"
 # =============================================================================
-echo "    Deleting master pod: $MPOD"
-$KUBE delete pod "$MPOD" -n "$NS" --grace-period=0 --force 2>/dev/null || true
-pass "Master pod deleted"
+echo "    Cordoning node ${ACTIVE_NODE} to prevent pod rescheduling..."
+$KUBE cordon "$ACTIVE_NODE"
 
-# Wait for Deployment controller to detect the deletion and mark unavailable.
-sleep 3
-
-# Confirm master is down (new pod not yet Running).
-NEW_MPOD=$(master_pod 2>/dev/null || true)
-if [ -n "$NEW_MPOD" ] && [ "$NEW_MPOD" != "$MPOD" ]; then
-    echo "    Deployment already restarted a new pod: $NEW_MPOD — scaling down to keep it down"
-    $KUBE scale deployment "$MASTER_DEPLOY" -n "$NS" --replicas=0
-    sleep 5
-else
-    echo "    Master is down (no running pod)"
-fi
-pass "Master confirmed down"
+echo "    Deleting active master pod ${ACTIVE_POD}..."
+$KUBE delete pod "$ACTIVE_POD" -n "$NS" --grace-period=0 --force 2>/dev/null || true
+pass "Master pod deleted; node cordoned — Lease will expire in ~30s"
 
 # =============================================================================
-step "4+5. Rebuild metadata.sfs from metalogger journal and write it into the master PVC"
+step "4. Wait for shadow to acquire Lease (max 60 s)"
 # =============================================================================
-# The metalogger image does NOT include sfsmetarestore — only the master image
-# does. We therefore spin up a temporary pod (RESTORE_POD) using the master
-# image that mounts:
-#   - the metalogger-0 PVC (read-only) at /ml
-#   - the master PVC (read-write) at /data
-# and runs sfsmetarestore directly, writing metadata.sfs into the master PVC.
-# This combines the old steps 4 and 5 into a single atomic operation.
-
-MASTER_PVC="${CLUSTER}-master-metadata"
-ML_PVC="metalogger-data-${METALOGGER_STS}-0"
-RESTORE_POD="master-failover-restore"
-MASTER_IMAGE=$(${KUBE} get deployment "${MASTER_DEPLOY}" -n "${NS}" \
-    -o jsonpath='{.spec.template.spec.containers[0].image}')
-echo "    Master image: ${MASTER_IMAGE}"
-echo "    Master PVC:   ${MASTER_PVC}"
-echo "    Metalogger PVC: ${ML_PVC}"
-
-# Clean up any leftover restore pod.
-$KUBE delete pod "$RESTORE_POD" -n "$NS" --ignore-not-found --grace-period=0 2>/dev/null || true
-sleep 2
-
-echo "    Listing metalogger data dir (via kubectl exec):"
-kexec "$METALOGGER_POD" ls -lh /var/lib/saunafs/
-
-# Build the sfsmetarestore invocation.
-# changelog_ml.sfs.* files are sorted numerically by the last extension component.
-RESTORE_CMD='
-set -e
-ML=/ml
-OUT=/data
-WORK=/tmp/sfsrestore
-
-echo "[restore] metalogger data:"
-ls -lh $ML/
-
-# sfsmetarestore tries to open a lock file in the same directory as the input
-# metadata file, so we must copy inputs to a writable temp directory first.
-mkdir -p $WORK
-cp $ML/metadata_ml.sfs $WORK/metadata_ml.sfs
-
-CHANGELOGS_ML=$(ls $ML/changelog_ml.sfs $ML/changelog_ml.sfs.* 2>/dev/null | sort -t. -k3 -n || true)
-CHANGELOGS_WORK=""
-for f in $CHANGELOGS_ML; do
-    base=$(basename $f)
-    cp $f $WORK/$base
-    CHANGELOGS_WORK="$CHANGELOGS_WORK $WORK/$base"
+echo "    Polling Lease holder every 3s..."
+NEW_HOLDER=""
+for i in $(seq 1 20); do
+    sleep 3
+    NEW_HOLDER=$(lease_holder)
+    echo "      t+$((i*3))s: holder=${NEW_HOLDER}"
+    if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$ACTIVE_POD" ]; then
+        break
+    fi
 done
-echo "[restore] changelogs copied: ${CHANGELOGS_WORK:-<none>}"
 
-if [ -z "$CHANGELOGS_WORK" ]; then
-    echo "[restore] No changelogs — copying snapshot as-is."
-    cp $WORK/metadata_ml.sfs $OUT/metadata.sfs
-else
-    echo "[restore] Running sfsmetarestore..."
-    sfsmetarestore -m $WORK/metadata_ml.sfs -o $OUT/metadata.sfs $CHANGELOGS_WORK
-fi
+[ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$ACTIVE_POD" ] || \
+    fail "Shadow did not acquire Lease within 60s (current holder='${NEW_HOLDER}')"
+pass "Lease acquired by: ${NEW_HOLDER}"
 
-echo "[restore] Removing stale lock file (if any)..."
-rm -f $OUT/metadata.sfs.lock
-
-echo "[restore] Result:"
-ls -lh $OUT/metadata.sfs
-echo "[restore] Done."
-'
-
-echo "    Spawning restore pod (master image + both PVCs)..."
-$KUBE run "$RESTORE_POD" -n "$NS" \
-    --image="${MASTER_IMAGE}" \
-    --restart=Never \
-    --overrides="{
-        \"spec\": {
-            \"imagePullSecrets\": [{\"name\": \"ghcr-pull-secret\"}],
-            \"volumes\": [
-                {\"name\": \"master-data\", \"persistentVolumeClaim\": {\"claimName\": \"${MASTER_PVC}\"}},
-                {\"name\": \"ml-data\",     \"persistentVolumeClaim\": {\"claimName\": \"${ML_PVC}\", \"readOnly\": true}}
-            ],
-            \"containers\": [{
-                \"name\": \"restore\",
-                \"image\": \"${MASTER_IMAGE}\",
-                \"command\": [\"sh\", \"-c\", $(echo "$RESTORE_CMD" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')],
-                \"volumeMounts\": [
-                    {\"name\": \"master-data\", \"mountPath\": \"/data\"},
-                    {\"name\": \"ml-data\",     \"mountPath\": \"/ml\"}
-                ]
-            }]
-        }
-    }"
-
-echo "    Waiting for restore pod to complete (timeout 120s)..."
-# The pod runs to completion; poll until phase is Succeeded or Failed.
-for i in $(seq 1 60); do
-    RESTORE_STATUS=$($KUBE get pod "$RESTORE_POD" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-    case "$RESTORE_STATUS" in
-        Succeeded|Failed) break ;;
-        *) sleep 2 ;;
-    esac
+# Wait for the new master pod to be Running/Ready (it deleted itself and restarted).
+echo "    Waiting for new master pod to be Running..."
+for i in $(seq 1 20); do
+    PHASE=$($KUBE get pod "$NEW_HOLDER" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    echo "      t+$((i*3))s: ${NEW_HOLDER} phase=${PHASE}"
+    [ "$PHASE" = "Running" ] && break
+    sleep 3
 done
-echo "    Restore pod logs:"
-$KUBE logs -n "$NS" "$RESTORE_POD" 2>/dev/null || true
-
-RESTORE_STATUS=$($KUBE get pod "$RESTORE_POD" -n "$NS" -o jsonpath='{.status.phase}')
-echo "    Restore pod phase: ${RESTORE_STATUS}"
-[ "$RESTORE_STATUS" = "Succeeded" ] || {
-    echo "    Restore pod logs:"
-    $KUBE logs -n "$NS" "$RESTORE_POD" 2>/dev/null || true
-    fail "Restore pod did not succeed (phase=${RESTORE_STATUS})"
-}
-
-echo "    Cleaning up restore pod..."
-$KUBE delete pod "$RESTORE_POD" -n "$NS" --grace-period=0 2>/dev/null || true
-
-pass "metadata.sfs rebuilt and written to master PVC"
+PHASE=$($KUBE get pod "$NEW_HOLDER" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+[ "$PHASE" = "Running" ] || fail "New master pod ${NEW_HOLDER} is not Running (phase=${PHASE})"
+pass "New master pod Running"
 
 # =============================================================================
-step "6. Restart the master and NFS, wait for Ready"
+step "5. Uncordon node to allow former master to come back as shadow"
 # =============================================================================
-echo "    Scaling master deployment back to 1..."
-$KUBE scale deployment "$MASTER_DEPLOY" -n "$NS" --replicas=1 2>/dev/null || true
-
-wait_deploy "$MASTER_DEPLOY" 120
-NEW_MPOD=$(master_pod)
-[ -n "$NEW_MPOD" ] || fail "Master pod not running after restart"
-pass "Master restarted: $NEW_MPOD"
-
-echo "    Master logs (last 10 lines):"
-$KUBE logs -n "$NS" "$NEW_MPOD" --tail=10 2>/dev/null || true
-
-# NFS-Ganesha (saunafs FSAL) loses its connection to the master when the
-# master is killed. It must be restarted after the master is back up to
-# re-establish the connection and clear stale file handles.
-echo "    Restarting NFS deployment to reconnect ganesha to new master..."
-$KUBE rollout restart deployment "$NFS_DEPLOY" -n "$NS"
-$KUBE rollout status deployment "$NFS_DEPLOY" -n "$NS" --timeout=90s
-pass "NFS deployment restarted"
+$KUBE uncordon "$ACTIVE_NODE"
+pass "Node ${ACTIVE_NODE} uncordoned"
 
 # =============================================================================
-step "7. Verify SaunaFSCluster status is Ready"
+step "6. Verify new master started with PERSONALITY=master"
 # =============================================================================
-sleep 10
-STATUS=$($KUBE get saunafscluster "$CLUSTER" -n "$NS" \
-    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-[ "$STATUS" = "True" ] || fail "SaunaFSCluster not Ready after failover (status=${STATUS})"
-pass "SaunaFSCluster: Ready=True"
+INIT_LOG=$($KUBE logs "$NEW_HOLDER" -n "$NS" -c init-config 2>/dev/null || echo "")
+echo "$INIT_LOG" | grep -q "I am the Lease holder" || \
+    fail "init-config did not log 'I am the Lease holder' for ${NEW_HOLDER}"
+pass "init-config confirmed PERSONALITY=master for ${NEW_HOLDER}"
+
+# =============================================================================
+step "7. Verify SaunaFSCluster status.activeMaster is updated"
+# =============================================================================
+# Give the operator a reconcile cycle (≤5s).
+sleep 8
+STATUS_MASTER=$($KUBE get saunafscluster "$CLUSTER" -n "$NS" \
+    -o jsonpath='{.status.activeMaster}' 2>/dev/null || echo "")
+[ "$STATUS_MASTER" = "$NEW_HOLDER" ] || \
+    fail "status.activeMaster='${STATUS_MASTER}', expected '${NEW_HOLDER}'"
+pass "status.activeMaster=${STATUS_MASTER}"
 
 # =============================================================================
 step "8. Verify test data is still readable after failover"
 # =============================================================================
-echo "    Re-mounting NFS and checking test file..."
+# Restart NFS so ganesha reconnects to the new master.
+echo "    Restarting NFS deployment to reconnect to new master..."
+$KUBE rollout restart deployment "$NFS_DEPLOY" -n "$NS"
+$KUBE rollout status deployment "$NFS_DEPLOY" -n "$NS" --timeout=90s
+
+echo "    Re-mounting NFS and reading test file..."
 FOUND=$(docker exec saunafs-operator-control-plane bash -c "
-    mkdir -p /mnt/saunafs-test &&
+    mkdir -p /mnt/saunafs-test
     mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/saunafs-test 2>/dev/null || \
-        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test &&
-    cat /mnt/saunafs-test/${TEST_FILE} 2>/dev/null || echo '__NOT_FOUND__' &&
+        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test
+    cat /mnt/saunafs-test/${TEST_FILE} 2>/dev/null || echo '__NOT_FOUND__'
     umount /mnt/saunafs-test
 ")
-
 echo "    File content: '$FOUND'"
-if [ "$FOUND" = "$TEST_CONTENT" ]; then
-    pass "Test file content matches — data survived master failover"
-else
+[ "$FOUND" = "$TEST_CONTENT" ] || \
     fail "Test file content mismatch. Expected='${TEST_CONTENT}' Got='${FOUND}'"
-fi
+pass "Test file content matches — data survived master failover"
+
+# =============================================================================
+step "9. Wait for former master to come back as shadow"
+# =============================================================================
+echo "    Waiting for ${ACTIVE_POD} to restart (max 60s)..."
+for i in $(seq 1 20); do
+    PHASE=$($KUBE get pod "$ACTIVE_POD" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
+    echo "      t+$((i*3))s: ${ACTIVE_POD} phase=${PHASE}"
+    [ "$PHASE" = "Running" ] && break
+    sleep 3
+done
+PHASE=$($KUBE get pod "$ACTIVE_POD" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+[ "$PHASE" = "Running" ] || fail "Former master ${ACTIVE_POD} did not restart (phase=${PHASE})"
+
+INIT_LOG_OLD=$($KUBE logs "$ACTIVE_POD" -n "$NS" -c init-config 2>/dev/null || echo "")
+echo "$INIT_LOG_OLD" | grep -q "starting as shadow" || \
+    fail "Former master ${ACTIVE_POD} did not start as shadow"
+pass "Former master ${ACTIVE_POD} restarted as shadow"
 
 # =============================================================================
 echo -e "\n${GREEN}=====================================================${NC}"
-echo -e "${GREEN}  Master failover scenario: ALL STEPS PASSED${NC}"
+echo -e "${GREEN}  Master HA failover scenario: ALL STEPS PASSED${NC}"
 echo -e "${GREEN}=====================================================${NC}"

@@ -693,6 +693,13 @@ spec:
                     description: Service Type string describes ingress methods for
                       a service
                     type: string
+                  startupGracePeriod:
+                    description: |-
+                      StartupGracePeriod is how long the ha-sidecar waits after pod start
+                      before it begins monitoring sfsmaster health via pgrep. This covers
+                      the time needed to load metadata (proportional to filesystem size).
+                      Defaults to 30s. Increase for large filesystems with many inodes.
+                    type: string
                   tolerations:
                     items:
                       description: |-

@@ -25,6 +25,10 @@ spec:
     # StorageClass defaults to the cluster default (local-path in Kind).
     metadataStorage:
       size: 1Gi
+    # startupGracePeriod is how long the ha-sidecar waits after pod start
+    # before health-checking sfsmaster via pgrep. Increase for large
+    # filesystems where metadata loading takes longer (default: 30s).
+    # startupGracePeriod: 30s
   # Shadow master — hot standby that receives the changelog stream from the
   # active master. If the active master disappears the operator promotes the
   # shadow automatically (no sfsmetarestore needed). Requires at least 1 replica.

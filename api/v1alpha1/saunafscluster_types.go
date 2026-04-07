@@ -189,6 +189,12 @@ type MasterSpec struct {
 	// MetadataStorage configures the PVC used to persist /var/lib/saunafs.
 	// If omitted, a default 1Gi PVC is created automatically.
 	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
+	// StartupGracePeriod is how long the ha-sidecar waits after pod start
+	// before it begins monitoring sfsmaster health via pgrep. This covers
+	// the time needed to load metadata (proportional to filesystem size).
+	// Defaults to 30s. Increase for large filesystems with many inodes.
+	// +optional
+	StartupGracePeriod *metav1.Duration `json:"startupGracePeriod,omitempty"`
 }
 
 // ShadowSpec configures the shadow master StatefulSet.

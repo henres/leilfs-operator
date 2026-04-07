@@ -1615,6 +1615,12 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
 	saName := fmt.Sprintf("%s-master", cluster.Name)
 
+	const defaultStartupGrace = 30 * time.Second
+	startupGrace := defaultStartupGrace
+	if cluster.Spec.Master.StartupGracePeriod != nil {
+		startupGrace = cluster.Spec.Master.StartupGracePeriod.Duration
+	}
+
 	// init-config: read Lease → decide master or shadow personality.
 	// Uses wget (available in the saunafs-master image) to call the kube API.
 	// Falls back to shadow if HA is not configured (no Lease name injected).
@@ -1690,6 +1696,7 @@ LEASE_URL="${APISERVER}/apis/coordination.k8s.io/v1/namespaces/${NS}/leases/${LE
 RENEW_INTERVAL=%d
 OBSERVE_INTERVAL=%d
 LEASE_DURATION=%d
+STARTUP_GRACE=%d
 TOKEN_FILE=/var/run/secrets/kubernetes.io/serviceaccount/token
 
 # Helper: GET Lease JSON
@@ -1731,7 +1738,12 @@ delete_self() {
   sleep 60
 }
 
-echo "[ha-sidecar] starting, pod=${MY_POD}"
+echo "[ha-sidecar] starting, pod=${MY_POD}, startup_grace=${STARTUP_GRACE}s"
+
+# Wait for sfsmaster to load metadata before we start health-checking it.
+# This covers large filesystems where metadata load takes tens of seconds.
+sleep ${STARTUP_GRACE}
+echo "[ha-sidecar] startup grace period elapsed, entering main loop"
 
 while true; do
   LEASE=$(get_lease)
@@ -1745,7 +1757,16 @@ while true; do
   RES_VER=$(json_field "${LEASE}" "resourceVersion")
 
   if [ "${HOLDER}" = "${MY_POD}" ]; then
-    # ── I am the holder: renew ──────────────────────────────────────────────
+    # ── I am the holder: check sfsmaster is alive, then renew ───────────────
+    if ! pgrep -x sfsmaster > /dev/null 2>&1; then
+      echo "[ha-sidecar] sfsmaster not running, releasing Lease so a shadow can take over"
+      # Release: PATCH holderIdentity to empty so shadows see an expired lease
+      NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)
+      RELEASE_BODY="{\"spec\":{\"holderIdentity\":\"\",\"renewTime\":\"${NOW}\",\"leaseDurationSeconds\":${LEASE_DURATION}}}"
+      patch_lease "${RELEASE_BODY}" > /dev/null
+      delete_self
+      continue
+    fi
     NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)
     BODY="{\"spec\":{\"holderIdentity\":\"${MY_POD}\",\"renewTime\":\"${NOW}\",\"leaseDurationSeconds\":${LEASE_DURATION}}}"
     RESULT=$(patch_lease "${BODY}")
@@ -1793,6 +1814,7 @@ done
 		int(leaseRenewInterval.Seconds()),
 		int(leaseObserveInterval.Seconds()),
 		int(leaseDuration.Seconds()),
+		int(startupGrace.Seconds()),
 	)
 
 	cfgVolume := corev1.Volume{

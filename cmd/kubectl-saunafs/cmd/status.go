@@ -17,13 +17,20 @@ limitations under the License.
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	k8sscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 func newStatusCmd(opts *rootOptions) *cobra.Command {
@@ -32,8 +39,9 @@ func newStatusCmd(opts *rootOptions) *cobra.Command {
 		Short: "Show the status of a SaunaFSCluster",
 		Long: `Show detailed status information for a SaunaFSCluster resource.
 
-Displays conditions, chunk server counts, master configuration, and component
-enablement (NFS, WebUI, Expose).
+Displays conditions, chunk server counts, master configuration, component
+enablement (NFS, WebUI, Expose), and the real installed version of each
+master and chunkserver pod (via kubectl exec).
 
 Examples:
   kubectl saunafs status my-cluster
@@ -54,6 +62,11 @@ func runStatus(opts *rootOptions, name string) error {
 	dynClient, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("creating dynamic client: %w", err)
+	}
+
+	k8sClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
 	ns, err := resolveNamespace(opts.kubeconfig, opts.namespace)
@@ -99,10 +112,95 @@ func runStatus(opts *rootOptions, name string) error {
 	}
 	fmt.Println()
 
+	// --- HA status ---
+	activeMaster := extractString(data, "status", "activeMaster")
+	readyShadows := extractInt64(data, "status", "readyShadows")
+	readyMetaloggers := extractInt64(data, "status", "readyMetaloggers")
+	if activeMaster != "" {
+		fmt.Printf("Active Master:  %s\n", activeMaster)
+		fmt.Printf("Ready Shadows:  %d\n", readyShadows)
+		fmt.Printf("Metaloggers:    %d\n", readyMetaloggers)
+		fmt.Println()
+	}
+
 	// --- Chunk servers ---
 	readyChunks := extractInt64(data, "status", "readyChunkServers")
 	totalChunks := extractInt64(data, "status", "totalChunkServers")
 	fmt.Printf("Chunk Servers:  %d ready / %d total\n", readyChunks, totalChunks)
+	fmt.Println()
+
+	// --- Versions (exec into running pods) ---
+	fmt.Println("Versions:")
+
+	// Collect targets: master StatefulSet pods + one pod per chunkserver StatefulSet.
+	type versionTarget struct {
+		label     string // display name
+		podName   string
+		container string
+		binary    string
+	}
+
+	var targets []versionTarget
+
+	// Master pods: list pods in the master StatefulSet by label.
+	masterPods, err := k8sClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=saunafs-master,app.kubernetes.io/instance=%s", name),
+	})
+	if err == nil {
+		for _, p := range masterPods.Items {
+			label := p.Name
+			if p.Name == activeMaster {
+				label += " (active)"
+			}
+			targets = append(targets, versionTarget{
+				label:     label,
+				podName:   p.Name,
+				container: "saunafs-master",
+				binary:    "sfsmaster",
+			})
+		}
+	}
+
+	// Chunkserver pods: one StatefulSet per server entry, each with replicas=1.
+	servers := extractSlice(data, "spec", "chunk", "servers")
+	for _, s := range servers {
+		sm, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		sName := stringVal(sm["name"])
+		podName := fmt.Sprintf("%s-chunk-%s-0", name, sName)
+		targets = append(targets, versionTarget{
+			label:     fmt.Sprintf("chunk/%s", sName),
+			podName:   podName,
+			container: "saunafs-chunkserver",
+			binary:    "sfschunkserver",
+		})
+	}
+
+	// Fetch all versions in parallel.
+	type versionResult struct {
+		label   string
+		version string
+	}
+	results := make([]versionResult, len(targets))
+	var wg sync.WaitGroup
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t versionTarget) {
+			defer wg.Done()
+			v, err := execVersionInPod(ctx, cfg, k8sClient, ns, t.podName, t.container, t.binary)
+			if err != nil {
+				v = fmt.Sprintf("<error: %v>", err)
+			}
+			results[i] = versionResult{label: t.label, version: v}
+		}(i, t)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		fmt.Printf("  %-40s  %s\n", r.label, r.version)
+	}
 	fmt.Println()
 
 	// --- Spec summary ---
@@ -125,7 +223,6 @@ func runStatus(opts *rootOptions, name string) error {
 	}
 	fmt.Printf("  Chunk image:     %s\n", chunkImage)
 
-	servers := extractSlice(data, "spec", "chunk", "servers")
 	fmt.Printf("  Chunk servers:   %d defined\n", len(servers))
 	for _, s := range servers {
 		sm, ok := s.(map[string]interface{})
@@ -181,6 +278,51 @@ func runStatus(opts *rootOptions, name string) error {
 }
 
 // --- helpers ---
+
+// execVersionInPod runs `<binary> --version` inside a running pod via exec
+// and returns the trimmed first line of the output.
+// It uses the SPDY executor (same protocol as `kubectl exec`).
+func execVersionInPod(
+	ctx context.Context,
+	cfg *rest.Config,
+	k8s kubernetes.Interface,
+	ns, podName, containerName, binary string,
+) (string, error) {
+	req := k8s.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(ns).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   []string{binary, "-v"},
+			Stdout:    true,
+			Stderr:    true,
+		}, k8sscheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("creating executor: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}); err != nil {
+		return "", fmt.Errorf("exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+
+	out := strings.TrimSpace(stdout.String())
+	if out == "" {
+		out = strings.TrimSpace(stderr.String())
+	}
+	// Keep only the first line (some binaries print multiple lines).
+	if idx := strings.Index(out, "\n"); idx >= 0 {
+		out = out[:idx]
+	}
+	return out, nil
+}
 
 func stringVal(v interface{}) string {
 	s, _ := v.(string)

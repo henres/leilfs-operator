@@ -1681,7 +1681,6 @@ exec /saunafs-master.start.sh
 	//     atomic compare-and-swap PATCH (using resourceVersion). On success,
 	//     kill sfsmaster → pod restarts → init-container → starts as master.
 	sidecarCmd := fmt.Sprintf(`
-TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 APISERVER=https://kubernetes.default.svc
@@ -1691,18 +1690,20 @@ LEASE_URL="${APISERVER}/apis/coordination.k8s.io/v1/namespaces/${NS}/leases/${LE
 RENEW_INTERVAL=%d
 OBSERVE_INTERVAL=%d
 LEASE_DURATION=%d
+TOKEN_FILE=/var/run/secrets/kubernetes.io/serviceaccount/token
 
 # Helper: GET Lease JSON
+# Token is re-read on every call: projected SA tokens rotate every ~1h.
 get_lease() {
   wget --ca-certificate=${CA} \
-    --header="Authorization: Bearer ${TOKEN}" \
+    --header="Authorization: Bearer $(cat ${TOKEN_FILE})" \
     -qO- "${LEASE_URL}" 2>/dev/null
 }
 
 # Helper: PATCH Lease (merge-patch)
 patch_lease() {
   wget --ca-certificate=${CA} \
-    --header="Authorization: Bearer ${TOKEN}" \
+    --header="Authorization: Bearer $(cat ${TOKEN_FILE})" \
     --header="Content-Type: application/merge-patch+json" \
     --method=PATCH \
     --body-data="$1" \
@@ -1723,7 +1724,7 @@ json_int() {
 delete_self() {
   POD_URL="${APISERVER}/api/v1/namespaces/${NS}/pods/${MY_POD}"
   wget --ca-certificate=${CA} \
-    --header="Authorization: Bearer ${TOKEN}" \
+    --header="Authorization: Bearer $(cat ${TOKEN_FILE})" \
     --method=DELETE \
     -qO- "${POD_URL}" 2>/dev/null || true
   # If delete succeeded the pod will be evicted; sleep to avoid tight loop

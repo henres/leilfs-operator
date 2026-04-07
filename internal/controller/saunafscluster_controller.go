@@ -69,6 +69,135 @@ const (
 	leaseObserveInterval = 5 * time.Second
 )
 
+// defaultResources returns r if any requests or limits are already set,
+// otherwise it returns the provided defaults.  This allows users to override
+// the built-in baselines by setting spec.<component>.resources in the CR.
+func defaultResources(r corev1.ResourceRequirements, defaults corev1.ResourceRequirements) corev1.ResourceRequirements {
+	if len(r.Requests) > 0 || len(r.Limits) > 0 {
+		return r
+	}
+	return defaults
+}
+
+// masterDefaultResources returns conservative but realistic resource defaults
+// for a saunafs-master / shadow pod.
+// RAM: the master keeps ALL metadata in memory (~300 bytes/file). 512Mi covers
+// ~1.7M files at idle; the limit of 2Gi gives headroom for large namespaces.
+// CPU: metadata operations are bursty; 100m idle, 1 core burst is a safe start.
+func masterDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1000m"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+	}
+}
+
+// chunkDefaultResources returns defaults for a saunafs-chunkserver pod.
+// RAM: chunk servers maintain a block map in memory; 256Mi request / 1Gi limit
+// covers most workloads. Adjust upward for high-IOPS deployments.
+func chunkDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("2000m"),
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
+		},
+	}
+}
+
+// metaloggerDefaultResources returns defaults for a saunafs-metalogger pod.
+// Metaloggers are lightweight: they only replay changelogs.
+func metaloggerDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("50m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("200m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+}
+
+// nfsDefaultResources returns defaults for an nfs-ganesha pod.
+// NFS-Ganesha keeps per-client state and can be CPU-intensive under load.
+func nfsDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("2000m"),
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
+		},
+	}
+}
+
+// webUIDefaultResources returns defaults for the saunafs-cgiserver pod.
+// The CGI interface is very lightweight.
+func webUIDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("200m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+	}
+}
+
+// sidecarDefaultResources returns defaults for the ha-sidecar shell container.
+// It only runs wget every 10 s — truly minimal footprint.
+func sidecarDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("5m"),
+			corev1.ResourceMemory: resource.MustParse("16Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("50m"),
+			corev1.ResourceMemory: resource.MustParse("32Mi"),
+		},
+	}
+}
+
+// masterPodAntiAffinity returns a preferred anti-affinity rule that spreads
+// master StatefulSet pods across different nodes.  Using "preferred" rather
+// than "required" avoids unschedulable pods on single-node dev clusters while
+// still giving the scheduler a strong hint to separate master and shadows in
+// production.
+func masterPodAntiAffinity(stsName string) *corev1.Affinity {
+	return &corev1.Affinity{
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 100,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app.kubernetes.io/name": "saunafs-master",
+							},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+	}
+}
+
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/finalizers,verbs=update
@@ -614,7 +743,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 							Image:           image,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Ports:           chunkPorts,
-							Resources:       srv.Resources,
+							Resources:       defaultResources(srv.Resources, chunkDefaultResources()),
 							VolumeMounts:    allMounts,
 						},
 					},
@@ -736,7 +865,7 @@ func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, clust
 								"-P", fmt.Sprintf("%d", port),
 							},
 							Ports:     []corev1.ContainerPort{{Name: "http", ContainerPort: port}},
-							Resources: iface.Resources,
+							Resources: defaultResources(iface.Resources, webUIDefaultResources()),
 						},
 					},
 				},
@@ -1037,7 +1166,7 @@ EXPORT
 							Name:            "nfs-ganesha",
 							Image:           ganeshaImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Resources:       nfs.Resources,
+							Resources:       defaultResources(nfs.Resources, nfsDefaultResources()),
 							// Start rpcbind (NFSv3 portmapper) as a background
 							// daemon before launching ganesha.nfsd. A brief sleep
 							// ensures rpcbind is ready before Ganesha registers its
@@ -1289,7 +1418,7 @@ func (r *SaunaFSClusterReconciler) reconcileMetaloggers(ctx context.Context, clu
 							Name:            "saunafs-metalogger",
 							Image:           image,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Resources:       ml.Resources,
+							Resources:       defaultResources(ml.Resources, metaloggerDefaultResources()),
 							VolumeMounts:    []corev1.VolumeMount{cfgMount, dataMount},
 						},
 					},
@@ -1682,11 +1811,11 @@ done
 
 	ports := masterContainerPorts(cluster)
 
-	// Resources: use master resources for pod-0, shadow resources for pod-1+.
-	// Since StatefulSet has a single container spec, we use master resources
-	// for all pods. Shadow resources (if different) can be added later via
-	// per-ordinal resource overrides (requires a future operator enhancement).
-	resources := cluster.Spec.Master.Resources
+	// Resources: use master resources for all pods in the StatefulSet.
+	// Shadow resources (if different) would require per-ordinal overrides —
+	// not yet supported; master spec governs all pods.
+	// Apply built-in defaults when the user has not set any requests/limits.
+	resources := defaultResources(cluster.Spec.Master.Resources, masterDefaultResources())
 
 	// POD_NAME env var is injected via the downward API so both init-containers
 	// and the sidecar know their own pod name without kubectl.
@@ -1706,6 +1835,7 @@ done
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         []string{"sh", "-c", sidecarCmd},
 			Env:             []corev1.EnvVar{podNameEnv},
+			Resources:       sidecarDefaultResources(),
 		})
 	}
 
@@ -1725,7 +1855,12 @@ done
 					ServiceAccountName:    saName,
 					NodeSelector:          cluster.Spec.Master.NodeSelector,
 					Tolerations:           cluster.Spec.Master.Tolerations,
-					Volumes:               volumes,
+					// Prefer spreading master/shadow pods across different nodes so
+					// that a single-node failure does not take down both the active
+					// master and all shadows simultaneously.  "Preferred" (weight 100)
+					// rather than "required" keeps single-node dev clusters working.
+					Affinity: masterPodAntiAffinity(stsName),
+					Volumes:  volumes,
 					InitContainers: []corev1.Container{
 						{
 							Name:            "init-config",

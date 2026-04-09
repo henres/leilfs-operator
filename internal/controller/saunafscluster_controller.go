@@ -1675,6 +1675,10 @@ fi`,
 	masterRunCmd := `
 # Always remove the lock file before starting.
 rm -f /var/lib/saunafs/metadata.sfs.lock
+# Remove leftover temporary metadata file from a previous unclean shutdown
+# (e.g. OOM-kill, node reboot). Without this, sfsmaster refuses to start with:
+#   "temporary metadata file (metadata.sfs.tmp) exists, metadata directory is in dirty state"
+rm -f /var/lib/saunafs/metadata.sfs.tmp
 exec /saunafs-master.start.sh
 `
 

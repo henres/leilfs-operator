@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- disk_v1alpha1_localdisk.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

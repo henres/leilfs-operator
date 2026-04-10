@@ -1,0 +1,101 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdiskconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdiskconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdiskconfigs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdisks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdisks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - disk.localdisk-operator.io
+  resources:
+  - localdisks/status
+  verbs:
+  - get
+  - patch
+  - update

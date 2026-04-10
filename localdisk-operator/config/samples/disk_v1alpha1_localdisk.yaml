@@ -1,0 +1,49 @@
+# LocalDisk sample — manually triggering formatting on a raw disk
+#
+# In normal operation the agent DaemonSet creates LocalDisk objects
+# automatically when it detects unformatted block devices.  You would
+# then patch spec.format=true to approve formatting, rather than
+# applying this file directly.
+#
+# This sample is useful for:
+#   - testing the controller in isolation
+#   - understanding the full set of fields
+#   - kind/loopback device scenarios (see test/loop-disk-test.sh)
+#
+# The resource is cluster-scoped (no namespace).
+# Short name: kubectl get ld
+
+apiVersion: disk.localdisk-operator.io/v1alpha1
+kind: LocalDisk
+metadata:
+  # Name is typically set by the agent to "<nodename>-<device>" before the
+  # UUID is known, then renamed to the XFS UUID once formatting completes.
+  # For a loop-device test on a Kind node called "kind-worker" with /dev/loop0
+  # the agent would use: kind-worker-loop0
+  name: kind-worker-loop0
+  labels:
+    app.kubernetes.io/name: localdisk
+    app.kubernetes.io/part-of: localdisk-operator
+    app.kubernetes.io/managed-by: localdisk-operator
+spec:
+  # format: set to true to approve XFS formatting of this disk.
+  # WARNING: all data on the device will be destroyed.
+  # Once formatting starts this flag is effectively immutable.
+  # The agent transitions the disk through: Empty → PendingFormat → Formatting → Ready
+  format: true
+
+# Status is managed entirely by the agent — do not set it manually.
+# Shown here for documentation purposes only.
+#
+# status:
+#   node: kind-worker
+#   device: /dev/loop0
+#   serial: ""                        # empty for loop devices
+#   sizeBytes: 1073741824             # 1 GiB
+#   sizeHumanReadable: "1.0 GiB"
+#   fsType: xfs                       # populated after formatting
+#   uuid: "a1b2c3d4-..."              # XFS UUID, used as PV name
+#   mountPath: /mnt/localdisk/a1b2c3d4-...
+#   state: Ready                      # Empty | PendingFormat | Formatting | Ready | Missing | Unmanaged | FormatFailed
+#   message: ""
+#   lastUpdated: "2026-04-09T08:00:00Z"

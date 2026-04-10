@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: localdisk-agent
+  namespace: localdisk-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: localdisk-agent-role
+rules:
+  # Full control over LocalDisk CRs and their status.
+  - apiGroups: ["disk.localdisk-operator.io"]
+    resources: ["localdisks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["disk.localdisk-operator.io"]
+    resources: ["localdisks/status"]
+    verbs: ["get", "update", "patch"]
+  # Read node info to validate own node name.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: localdisk-agent-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: localdisk-agent-role
+subjects:
+  - kind: ServiceAccount
+    name: localdisk-agent
+    namespace: localdisk-operator-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: localdisk-agent
+  namespace: localdisk-operator-system
+  labels:
+    app.kubernetes.io/name: localdisk-agent
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: localdisk-agent
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: localdisk-agent
+        app.kubernetes.io/component: agent
+    spec:
+      serviceAccountName: localdisk-agent
+      # Required: the agent needs to run blkid, mkfs.xfs and mount on the host.
+      hostPID: false
+      tolerations:
+        # Run on all nodes including control-plane.
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: agent
+          image: agent:latest  # overridden by kustomize / helm
+          imagePullPolicy: IfNotPresent
+          command: ["/agent"]
+          args:
+            - --mount-base-dir=/mnt/localdisk
+            # Uncomment the following lines to include loop devices (Kind / test).
+            # - --include-loop-devices
+            # - --scan-interval=10s
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # Needed to run blkid on block devices and call mount(2).
+            privileged: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            # Expose host /dev so the agent can access block devices.
+            - name: dev
+              mountPath: /dev
+            # Expose host /sys so the agent can read sysfs attributes.
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+            # Mount base dir: agent creates subdirs here; must be shared
+            # with local-static-provisioner on the same host path.
+            - name: localdisk-mount-base
+              mountPath: /mnt/localdisk
+              mountPropagation: Bidirectional
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: localdisk-mount-base
+          hostPath:
+            path: /mnt/localdisk
+            type: DirectoryOrCreate

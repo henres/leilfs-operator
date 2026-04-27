@@ -1,0 +1,520 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Overview of all SaunaFSCluster resources reconciled by saunafs-operator: cluster phase, master HA state, chunkserver readiness (manual + auto-discovered), metaloggers, and operator-level reconcile activity.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "liveNow": false,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "Cluster overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Number of distinct SaunaFSCluster resources currently being reconciled.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "count(saunafs_cluster_info{namespace=~\"$namespace\", cluster=~\"$cluster\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Clusters",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Cluster phase derived from the Ready condition.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (cluster, phase) (saunafs_cluster_phase{namespace=~\"$namespace\", cluster=~\"$cluster\", phase=\"Ready\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{cluster}} ({{phase}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster Ready",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Sum of chunkserver StatefulSets currently Ready across all selected clusters.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 10, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(saunafs_cluster_chunkservers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Chunkservers Ready",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total chunkserver StatefulSets desired (manual + auto-discovered).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 14, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(saunafs_cluster_chunkservers_desired{namespace=~\"$namespace\", cluster=~\"$cluster\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Chunkservers Desired",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "PersistentVolumes currently matched by autoDiscover selectors.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 18, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(saunafs_cluster_autodiscover_pvs_matched{namespace=~\"$namespace\", cluster=~\"$cluster\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "Auto-discovered PVs",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "panels": [],
+      "title": "Per-cluster details",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Chunkserver readiness over time, per cluster. The 'desired' line breaks down into manual vs autodiscover so you can see when autoDiscover picks up new PVs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "min": 0,
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "id": 10,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_chunkservers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "legendFormat": "{{cluster}} ready",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_chunkservers_desired{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "legendFormat": "{{cluster}} desired ({{source}})",
+          "refId": "B"
+        }
+      ],
+      "title": "Chunkservers ready vs desired",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Master HA: desired vs ready master replicas (active + shadows).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto"
+          },
+          "min": 0,
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "id": 11,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_master_replicas_desired{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "legendFormat": "{{cluster}} masters desired",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_master_replicas_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "legendFormat": "{{cluster}} masters ready",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_metaloggers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "legendFormat": "{{cluster}} metaloggers ready",
+          "refId": "C"
+        }
+      ],
+      "title": "Master HA + metaloggers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-cluster snapshot of all key metrics. Use this table when you have many clusters in a single namespace.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "phase" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "Ready": { "color": "green", "index": 0 }, "Failed": { "color": "red", "index": 1 }, "Reconciling": { "color": "yellow", "index": 2 }, "Pending": { "color": "blue", "index": 3 } } }
+                ]
+              },
+              { "id": "custom.displayMode", "value": "color-background" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "id": 12,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "cluster", "desc": false }]
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_info{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_chunkservers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (namespace, cluster) (saunafs_cluster_chunkservers_desired{namespace=~\"$namespace\", cluster=~\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_master_replicas_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "D"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_metaloggers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "E"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "saunafs_cluster_autodiscover_pvs_matched{namespace=~\"$namespace\", cluster=~\"$cluster\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "F"
+        }
+      ],
+      "title": "Per-cluster snapshot",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "cluster", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true, "Time 6": true,
+              "__name__ 1": true, "container 1": true, "endpoint 1": true, "instance 1": true, "job 1": true,
+              "namespace 1": true, "namespace 2": true, "namespace 3": true, "namespace 4": true, "namespace 5": true, "namespace 6": true,
+              "pod 1": true, "service 1": true,
+              "exported_namespace 1": true, "exported_namespace 2": true, "exported_namespace 3": true, "exported_namespace 4": true, "exported_namespace 5": true, "exported_namespace 6": true
+            },
+            "renameByName": {
+              "Value #A": "info",
+              "Value #B": "chunk_ready",
+              "Value #C": "chunk_desired",
+              "Value #D": "masters_ready",
+              "Value #E": "metaloggers_ready",
+              "Value #F": "autodiscover_pvs",
+              "version": "saunafs_image"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 102,
+      "panels": [],
+      "title": "Operator health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Reconcile errors per second observed by the saunafs-operator controller, broken down by controller.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "min": 0,
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 20,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (controller) (rate(controller_runtime_reconcile_errors_total{job=~\".*saunafs-operator.*\"}[$__rate_interval]))",
+          "legendFormat": "{{controller}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (cluster) (rate(saunafs_cluster_reconcile_errors_total{namespace=~\"$namespace\", cluster=~\"$cluster\"}[$__rate_interval]))",
+          "legendFormat": "{{cluster}} (cluster-level)",
+          "refId": "B"
+        }
+      ],
+      "title": "Reconcile errors / sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total reconcile rate by controller, useful to detect tight reconcile loops.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "min": 0,
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 21,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (controller, result) (rate(controller_runtime_reconcile_total{job=~\".*saunafs-operator.*\"}[$__rate_interval]))",
+          "legendFormat": "{{controller}} ({{result}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Reconciles / sec",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["saunafs", "operator"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(saunafs_cluster_info, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
+        "options": [],
+        "query": { "query": "label_values(saunafs_cluster_info, namespace)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(saunafs_cluster_info{namespace=~\"$namespace\"}, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Cluster",
+        "multi": true,
+        "name": "cluster",
+        "options": [],
+        "query": { "query": "label_values(saunafs_cluster_info{namespace=~\"$namespace\"}, cluster)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "SaunaFS Operator — Overview",
+  "uid": "saunafs-operator-overview",
+  "version": 1,
+  "weekStart": ""
+}

@@ -255,7 +255,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	cluster.Status.TotalChunkServers = int32(len(cluster.Spec.Chunk.Servers))
+	cluster.Status.TotalChunkServers = r.countTotalChunkServers(ctx, cluster)
 
 	if reconcileErr != nil {
 		apimeta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
@@ -387,20 +387,44 @@ func (r *SaunaFSClusterReconciler) publishMetrics(ctx context.Context, cluster *
 }
 
 // countReadyChunkServers returns the number of chunk-server StatefulSets
-// whose desired replicas are all ready.
+// (both manually declared and auto-discovered) whose desired replicas
+// are all ready. We list by label rather than enumerating spec entries
+// so auto-discover STSes are included.
 func (r *SaunaFSClusterReconciler) countReadyChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+	stsList := &appsv1.StatefulSetList{}
+	if err := r.List(ctx, stsList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/name":     "saunafs-chunkserver",
+			"app.kubernetes.io/instance": cluster.Name,
+		},
+	); err != nil {
+		return 0
+	}
 	var ready int32
-	for _, srv := range cluster.Spec.Chunk.Servers {
-		name := fmt.Sprintf("%s-chunk-%s", cluster.Name, srv.Name)
-		sts := &appsv1.StatefulSet{}
-		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, sts); err != nil {
-			continue
-		}
-		if sts.Status.ReadyReplicas >= *sts.Spec.Replicas {
+	for i := range stsList.Items {
+		sts := &stsList.Items[i]
+		if sts.Spec.Replicas != nil && sts.Status.ReadyReplicas >= *sts.Spec.Replicas {
 			ready++
 		}
 	}
 	return ready
+}
+
+// countTotalChunkServers returns the total number of chunk-server
+// StatefulSets currently managed by this cluster (manual + auto).
+func (r *SaunaFSClusterReconciler) countTotalChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+	stsList := &appsv1.StatefulSetList{}
+	if err := r.List(ctx, stsList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/name":     "saunafs-chunkserver",
+			"app.kubernetes.io/instance": cluster.Name,
+		},
+	); err != nil {
+		return 0
+	}
+	return int32(len(stsList.Items))
 }
 
 // countReadyMetaloggers returns the number of ready metalogger replicas.
@@ -795,6 +819,11 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: cluster.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":     "saunafs-chunkserver",
+				"app.kubernetes.io/instance": cluster.Name,
+				"saunafs.io/chunk-server":    srv.Name,
+			},
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:    &replicas,
@@ -1776,6 +1805,14 @@ func (r *SaunaFSClusterReconciler) createOrUpdateStatefulSet(ctx context.Context
 	}
 	existing.Spec.Template = desired.Spec.Template
 	existing.Spec.Replicas = desired.Spec.Replicas
+	// Merge labels from desired onto existing so newly added labels (e.g.
+	// the chunk-server discovery labels) propagate to pre-existing STSes.
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	for k, v := range desired.Labels {
+		existing.Labels[k] = v
+	}
 	return r.Update(ctx, existing)
 }
 

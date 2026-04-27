@@ -36,6 +36,7 @@ import (
 
 	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
 	"github.com/henres/saunafs-operator/internal/controller"
+	"github.com/henres/saunafs-operator/internal/metrics"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -49,6 +50,11 @@ func init() {
 
 	utilruntime.Must(saunafsv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+
+	// Register custom Prometheus collectors with the controller-runtime
+	// metrics registry so they are exposed on the manager's /metrics
+	// endpoint alongside the built-in metrics.
+	metrics.MustRegister()
 }
 
 func main() {

@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
+	"github.com/henres/saunafs-operator/internal/metrics"
 )
 
 // SaunaFSClusterReconciler reconciles a SaunaFSCluster object
@@ -214,6 +215,11 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	cluster := &saunafsv1alpha1.SaunaFSCluster{}
 	if err := r.Get(ctx, req.NamespacedName, cluster); err != nil {
+		if errors.IsNotFound(err) {
+			// Cluster was deleted: drop all of its metrics so Prometheus
+			// doesn't keep stale series for non-existent objects.
+			metrics.DeleteCluster(req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -284,6 +290,11 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Publish Prometheus metrics from the freshly observed status. We do
+	// this after Status().Patch so the values shown in metrics are
+	// consistent with what is persisted on the cluster object.
+	r.publishMetrics(ctx, cluster, reconcileErr)
+
 	// When shadow HA is configured, requeue regularly so the operator can observe
 	// Lease changes and sync Service selector / status without waiting for a watch event.
 	if cluster.Spec.Shadow != nil && reconcileErr == nil {
@@ -291,6 +302,88 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	return ctrl.Result{}, reconcileErr
+}
+
+// publishMetrics updates Prometheus collectors from the freshly
+// reconciled cluster state. It is best-effort: any errors while
+// counting auto-discovered PVs are logged and don't fail the reconcile.
+func (r *SaunaFSClusterReconciler) publishMetrics(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, reconcileErr error) {
+	logger := log.FromContext(ctx)
+	ns := cluster.Namespace
+	name := cluster.Name
+
+	// Cluster info: tag with the master image so dashboards can group by
+	// SaunaFS version. Empty string when the user didn't pin an image.
+	version := cluster.Spec.Master.Image
+	metrics.ClusterInfo.WithLabelValues(ns, name, version).Set(1)
+
+	// Phase: derive from the latest Ready condition.
+	phase := "Pending"
+	if cond := apimeta.FindStatusCondition(cluster.Status.Conditions, saunafsv1alpha1.ConditionReady); cond != nil {
+		switch cond.Status {
+		case metav1.ConditionTrue:
+			phase = "Ready"
+		case metav1.ConditionFalse:
+			if reconcileErr != nil {
+				phase = "Failed"
+			} else {
+				phase = "Reconciling"
+			}
+		}
+	}
+	metrics.SetPhase(ns, name, phase)
+
+	// Master replicas (desired = 1 base + len(Shadow.Replicas) when HA).
+	desiredMasters := int32(1)
+	if cluster.Spec.Shadow != nil && cluster.Spec.Shadow.Replicas != nil {
+		desiredMasters += *cluster.Spec.Shadow.Replicas
+	}
+	metrics.MasterReplicasDesired.WithLabelValues(ns, name).Set(float64(desiredMasters))
+	readyShadows := cluster.Status.ReadyShadows
+	readyMasters := readyShadows
+	if cluster.Status.ActiveMaster != "" {
+		readyMasters++
+	}
+	metrics.MasterReplicasReady.WithLabelValues(ns, name).Set(float64(readyMasters))
+	metrics.ShadowReplicasReady.WithLabelValues(ns, name).Set(float64(readyShadows))
+
+	// Metaloggers.
+	metrics.MetaloggersReady.WithLabelValues(ns, name).Set(float64(cluster.Status.ReadyMetaloggers))
+
+	// Chunkservers: split desired between manual and auto-discover.
+	manualDesired := int32(len(cluster.Spec.Chunk.Servers))
+	metrics.ChunkServersDesired.WithLabelValues(ns, name, metrics.SourceManual).Set(float64(manualDesired))
+
+	autoDesired := int32(0)
+	if ad := cluster.Spec.Chunk.AutoDiscover; ad != nil && ad.Enabled {
+		// Re-list PVs to obtain a current count of matched PVs. This is
+		// the same selector logic used by reconcileAutoDiscoverChunkServers.
+		pvList := &corev1.PersistentVolumeList{}
+		if err := r.List(ctx, pvList); err != nil {
+			logger.Error(err, "metrics: listing PVs for autoDiscover count")
+		} else {
+			selector := ad.PVLabelSelector
+			if len(selector) == 0 {
+				selector = map[string]string{}
+			}
+			for _, pv := range pvList.Items {
+				if pvMatchesSelector(pv, selector) {
+					autoDesired++
+				}
+			}
+		}
+	}
+	metrics.ChunkServersDesired.WithLabelValues(ns, name, metrics.SourceAutoDiscover).Set(float64(autoDesired))
+	metrics.AutoDiscoverPVsMatched.WithLabelValues(ns, name).Set(float64(autoDesired))
+
+	// Total ready chunkservers (status field already aggregates manual + auto).
+	metrics.ChunkServersReady.WithLabelValues(ns, name).Set(float64(cluster.Status.ReadyChunkServers))
+
+	// Reconcile errors: increment counter on every failed reconcile so
+	// rate() panels show the error frequency.
+	if reconcileErr != nil {
+		metrics.ReconcileErrorsTotal.WithLabelValues(ns, name).Inc()
+	}
 }
 
 // countReadyChunkServers returns the number of chunk-server StatefulSets

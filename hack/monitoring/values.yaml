@@ -1,0 +1,71 @@
+# kube-prometheus-stack values for local development monitoring.
+# Targeted at Kind / single-node clusters.
+
+# Disable AlertManager: we only want Prom + Grafana for dashboarding.
+alertmanager:
+  enabled: false
+
+# Disable kube-state-metrics, node-exporter, control-plane scraping noise -
+# keep them enabled because dashboards reuse them, but avoid host-mounts
+# that often break on Kind.
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+prometheus-node-exporter:
+  hostRootFsMount:
+    enabled: false
+
+# Prometheus: emptyDir storage, allow scraping ServiceMonitors in all
+# namespaces regardless of release label (so users can drop SMs anywhere).
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    podMonitorSelector: {}
+    retention: 24h
+    # No PVC: ephemeral, suitable for dev clusters.
+    storageSpec: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# Grafana: emptyDir, fixed admin password, sidecar discovers dashboards
+# in any namespace via label `grafana_dashboard=1`.
+grafana:
+  adminPassword: admin
+  persistence:
+    enabled: false
+  service:
+    type: NodePort
+    nodePort: 30080
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      provider:
+        allowUiUpdates: true
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# Disable kube-controller-manager / scheduler / etcd scraping: in Kind
+# these endpoints aren't exposed and produce noisy "down" alerts.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

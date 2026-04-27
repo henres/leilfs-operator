@@ -1,0 +1,38 @@
+# Scrape the saunafs-operator manager metrics endpoint exposed by
+# kube-rbac-proxy on port 8443 (HTTPS, bearer token auth).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: saunafs-operator-prom-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: saunafs-operator-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: kube-prom-stack-kube-prome-prometheus
+    namespace: monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: saunafs-operator-controller-manager
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: saunafs-operator
+spec:
+  namespaceSelector:
+    matchNames:
+      - saunafs-operator-system
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: 30s
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true

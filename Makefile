@@ -168,6 +168,28 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default >> dist/install.yaml
 
+##@ Monitoring
+
+.PHONY: monitoring-up
+monitoring-up: ## Install kube-prometheus-stack + ServiceMonitor + dashboards in the current cluster.
+	./hack/monitoring/install.sh
+
+.PHONY: monitoring-down
+monitoring-down: ## Uninstall the monitoring stack and delete the namespace.
+	./hack/monitoring/uninstall.sh
+
+.PHONY: monitoring-dashboards
+monitoring-dashboards: ## Re-sync hack/monitoring/dashboards/*.json into the Grafana ConfigMap.
+	./hack/monitoring/sync-dashboards.sh
+
+.PHONY: monitoring-prometheus
+monitoring-prometheus: ## Port-forward Prometheus on http://localhost:9090.
+	kubectl --context kind-saunafs-operator -n monitoring port-forward svc/kube-prom-stack-kube-prome-prometheus 9090:9090
+
+.PHONY: monitoring-grafana
+monitoring-grafana: ## Port-forward Grafana on http://localhost:3000 (admin/admin).
+	kubectl --context kind-saunafs-operator -n monitoring port-forward svc/kube-prom-stack-grafana 3000:80
+
 ##@ Kind
 
 .PHONY: kind-prepare-dirs

@@ -250,8 +250,31 @@ type ChunkSpec struct {
 	Ports []NamedPort `json:"ports,omitempty"`
 	// Servers is the list of individually configured chunk servers.
 	// Each entry results in a dedicated Pod (or StatefulSet) on the target node.
-	// +kubebuilder:validation:MinItems=1
-	Servers []ChunkServerSpec `json:"servers"`
+	// +optional
+	Servers []ChunkServerSpec `json:"servers,omitempty"`
+	// AutoDiscover enables automatic discovery of PersistentVolumes created by
+	// the localdisk-operator. When enabled, the controller watches PVs matching
+	// the given label selector and automatically creates one chunkserver
+	// StatefulSet per discovered disk (PV). This is additive with Servers.
+	// +optional
+	AutoDiscover *ChunkAutoDiscoverSpec `json:"autoDiscover,omitempty"`
+}
+
+// ChunkAutoDiscoverSpec configures automatic chunkserver creation from PVs.
+type ChunkAutoDiscoverSpec struct {
+	// Enabled turns auto-discovery on or off.
+	Enabled bool `json:"enabled"`
+	// PVLabelSelector selects PersistentVolumes to use as chunk storage.
+	// Example: {"localdisk-operator.io/node": ""} matches all localdisk PVs.
+	// If empty and Enabled is true, defaults to {"localdisk-operator.io/disk": ""}.
+	// +optional
+	PVLabelSelector map[string]string `json:"pvLabelSelector,omitempty"`
+	// Tolerations applied to all auto-discovered chunkserver pods.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// Resources overrides the default resource requirements for auto-discovered chunkservers.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // ChunkServerSpec describes a single chunk server instance.

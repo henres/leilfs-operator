@@ -10,7 +10,7 @@ metadata:
   name: saunafscluster-sample
 spec:
   master:
-    image: ghcr.io/henres/saunafs-container/saunafs-master:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-master:5.9.0
     # nodeSelector:
     #   saunafs-role: master
     ports:
@@ -34,7 +34,7 @@ spec:
   # shadow automatically (no sfsmetarestore needed). Requires at least 1 replica.
   shadow:
     replicas: 1
-    image: ghcr.io/henres/saunafs-container/saunafs-master:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-master:5.9.0
     metadataStorage:
       storageClassName: standard
       size: 1Gi
@@ -42,14 +42,14 @@ spec:
   # Each replica gets its own PVC (local-path StorageClass in Kind).
   metalogger:
     replicas: 2
-    image: ghcr.io/henres/saunafs-container/saunafs-metalogger:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-metalogger:5.9.0
     metadataStorage:
       storageClassName: standard
       size: 1Gi
   # Chunk servers — 1 chunkserver per disk, 2 disks per node, 3 nodes = 6 chunkservers.
   # label matches the node name so goals can pin chunks to specific nodes.
   chunk:
-    image: ghcr.io/henres/saunafs-container/saunafs-chunkserver:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-chunkserver:5.9.0
     ports:
       - name: data
         containerPort: 9422
@@ -93,7 +93,7 @@ spec:
   csi:
     enabled: false
     driverName: saunafs.csi.saunafs-operator.io
-    image: ghcr.io/henres/saunafs-container/saunafs-client:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-client:5.9.0
   goals:
     # EC goal for maximum efficiency (6 CS required).
     - id: 10
@@ -112,7 +112,7 @@ spec:
         - worker3
   interface:
     enabled: true
-    image: ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest
+    image: ghcr.io/henres/saunafs-container/saunafs-cgiserver:5.9.0
     serviceType: NodePort
   nfs:
     enabled: true

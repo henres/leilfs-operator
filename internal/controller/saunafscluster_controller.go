@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
@@ -206,6 +207,7 @@ func masterPodAntiAffinity(stsName string) *corev1.Affinity {
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
 func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -234,6 +236,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		{"master ha rbac", r.reconcileMasterHARBAC},
 		{"master ha", r.reconcileMasterHA},
 		{"chunk servers", r.reconcileChunkServers},
+		{"auto-discover chunk servers", r.reconcileAutoDiscoverChunkServers},
 		{"metaloggers", r.reconcileMetaloggers},
 		{"interface", r.reconcileInterface},
 		{"expose service", r.reconcileExposeService},
@@ -650,7 +653,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 		image = cluster.Spec.Chunk.Image
 	}
 	if image == "" {
-		image = "ghcr.io/henres/saunafs-container/saunafs-chunkserver:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-chunkserver:5.9.0"
 	}
 
 	var replicas int32 = 1
@@ -805,6 +808,226 @@ func buildChunkVolumes(srv *saunafsv1alpha1.ChunkServerSpec) ([]corev1.VolumeMou
 	return mounts, volumes
 }
 
+// ── Auto-Discover Chunk Servers from PVs ─────────────────────────────────────
+
+// reconcileAutoDiscoverChunkServers watches PVs matching the configured label
+// selector and creates one chunkserver StatefulSet per discovered PV. Each PV
+// gets a dedicated PVC and StatefulSet, mirroring the manual ChunkServerSpec
+// pattern but driven entirely by PV existence.
+func (r *SaunaFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+	ad := cluster.Spec.Chunk.AutoDiscover
+	if ad == nil || !ad.Enabled {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	// Build label selector for PVs.
+	selector := ad.PVLabelSelector
+	if len(selector) == 0 {
+		selector = map[string]string{}
+	}
+	// Always require the localdisk-operator managed label.
+	if _, ok := selector["localdisk-operator.io/disk"]; !ok {
+		// If user didn't specify any label, match all localdisk PVs by checking
+		// for the existence of the disk label (list all PVs with that label).
+	}
+
+	// List all PVs.
+	pvList := &corev1.PersistentVolumeList{}
+	if err := r.List(ctx, pvList); err != nil {
+		return fmt.Errorf("listing PVs: %w", err)
+	}
+
+	// Filter PVs that match the selector labels.
+	var matchedPVs []corev1.PersistentVolume
+	for _, pv := range pvList.Items {
+		if !pvMatchesSelector(pv, selector) {
+			continue
+		}
+		matchedPVs = append(matchedPVs, pv)
+	}
+
+	logger.Info("Auto-discover: found matching PVs", "count", len(matchedPVs))
+
+	// For each matched PV, ensure a PVC and chunkserver StatefulSet exists.
+	for i := range matchedPVs {
+		pv := &matchedPVs[i]
+
+		// Extract node from PV nodeAffinity.
+		nodeName := nodeNameFromPV(pv)
+		if nodeName == "" {
+			logger.Info("Auto-discover: PV has no nodeAffinity, skipping", "pv", pv.Name)
+			continue
+		}
+
+		// Skip PVs that are in a failed/released state (disk removed).
+		if pv.Status.Phase != corev1.VolumeAvailable && pv.Status.Phase != corev1.VolumeBound {
+			logger.Info("Auto-discover: PV not available/bound, skipping",
+				"pv", pv.Name, "phase", pv.Status.Phase)
+			continue
+		}
+
+		// Derive a stable chunkserver name from the PV name (which is the disk UUID).
+		// Use only the first 8 chars of UUID to keep total name under 63 chars.
+		// Format: "ad-<uuid8>" — the "ad" prefix stands for "auto-discover".
+		// The full resource name will be "<cluster>-chunk-ad-<uuid8>" which stays
+		// well under 63 chars even with long cluster names.
+		pvShort := pv.Name
+		if len(pvShort) > 8 {
+			pvShort = pvShort[:8]
+		}
+		srvName := fmt.Sprintf("ad-%s", pvShort)
+
+		// Ensure PVC exists for this PV.
+		pvcName := fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)
+		if err := r.ensureAutoDiscoverPVC(ctx, cluster, pv, pvcName); err != nil {
+			return fmt.Errorf("auto-discover PVC for PV %s: %w", pv.Name, err)
+		}
+
+		// Build a synthetic ChunkServerSpec and reconcile it like a manual one.
+		mountPath := fmt.Sprintf("/mnt/%s", pv.Name)
+		srv := &saunafsv1alpha1.ChunkServerSpec{
+			Name:     srvName,
+			NodeName: nodeName,
+			Label:    saunafsLabel(nodeName),
+			MountPaths: []saunafsv1alpha1.MountPath{
+				{
+					Path:      mountPath,
+					ClaimName: pvcName,
+				},
+			},
+			Tolerations: ad.Tolerations,
+			Resources:   ad.Resources,
+		}
+
+		if err := r.reconcileChunkHeadlessService(ctx, cluster, srv); err != nil {
+			return fmt.Errorf("auto-discover chunk server %s headless service: %w", srvName, err)
+		}
+		if err := r.reconcileChunkHddConfigMap(ctx, cluster, srv); err != nil {
+			return fmt.Errorf("auto-discover chunk server %s hdd configmap: %w", srvName, err)
+		}
+		if err := r.reconcileChunkStatefulSet(ctx, cluster, srv); err != nil {
+			return fmt.Errorf("auto-discover chunk server %s: %w", srvName, err)
+		}
+	}
+
+	return nil
+}
+
+// ensureAutoDiscoverPVC creates a PVC that binds to a specific PV if it doesn't exist.
+func (r *SaunaFSClusterReconciler) ensureAutoDiscoverPVC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, pv *corev1.PersistentVolume, pvcName string) error {
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: cluster.Namespace}, existing)
+	if err == nil {
+		return nil // PVC already exists
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	// Determine storage size from PV.
+	storage := pv.Spec.Capacity[corev1.ResourceStorage]
+
+	// Empty storageClassName to match PVs with no class.
+	emptyClass := ""
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: cluster.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":       "saunafs-chunkserver",
+				"app.kubernetes.io/instance":   cluster.Name,
+				"app.kubernetes.io/managed-by": "saunafs-operator",
+				"saunafs.io/auto-discover":     "true",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: &emptyClass,
+			VolumeName:       pv.Name, // Bind directly to this PV.
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: storage,
+				},
+			},
+		},
+	}
+
+	if err := ctrl.SetControllerReference(cluster, pvc, r.Scheme); err != nil {
+		return err
+	}
+	return r.Create(ctx, pvc)
+}
+
+// pvMatchesSelector checks if a PV has all the required labels.
+// If a selector value is empty, only the key needs to exist.
+func pvMatchesSelector(pv corev1.PersistentVolume, selector map[string]string) bool {
+	if len(selector) == 0 {
+		// No selector means match all PVs with the localdisk label.
+		_, hasLabel := pv.Labels["localdisk-operator.io/disk"]
+		return hasLabel
+	}
+	for k, v := range selector {
+		pvVal, ok := pv.Labels[k]
+		if !ok {
+			return false
+		}
+		if v != "" && pvVal != v {
+			return false
+		}
+	}
+	return true
+}
+
+// nodeNameFromPV extracts the node name from a PV's nodeAffinity.
+func nodeNameFromPV(pv *corev1.PersistentVolume) string {
+	if pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
+		return ""
+	}
+	for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == "kubernetes.io/hostname" && expr.Operator == corev1.NodeSelectorOpIn && len(expr.Values) > 0 {
+				return expr.Values[0]
+			}
+		}
+	}
+	return ""
+}
+
+// sanitizeName converts a string to a valid Kubernetes name component.
+func sanitizeName(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.ReplaceAll(s, "_", "-")
+	// Remove any characters that are not alphanumeric or hyphens.
+	var result []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			result = append(result, c)
+		}
+	}
+	return string(result)
+}
+
+// saunafsLabel converts a string to a valid SaunaFS LABEL value.
+// SaunaFS labels must be alphanumeric with underscores only (no hyphens).
+func saunafsLabel(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	var result []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' {
+			result = append(result, c)
+		}
+	}
+	return string(result)
+}
+
 // ── CGI Interface Deployment ─────────────────────────────────────────────────
 
 func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
@@ -817,7 +1040,7 @@ func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, clust
 
 	image := iface.Image
 	if image == "" {
-		image = "ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-cgiserver:5.9.0"
 	}
 
 	port := iface.Port
@@ -1315,7 +1538,7 @@ func (r *SaunaFSClusterReconciler) reconcileMetaloggers(ctx context.Context, clu
 	// ── defaults ─────────────────────────────────────────────────────────────
 	image := ml.Image
 	if image == "" {
-		image = "ghcr.io/henres/saunafs-container/saunafs-metalogger:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-metalogger:5.9.0"
 	}
 
 	storageSize := resource.MustParse("5Gi")
@@ -1506,7 +1729,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Contex
 
 	image := cluster.Spec.Master.Image
 	if image == "" {
-		image = "ghcr.io/henres/saunafs-container/saunafs-master:latest"
+		image = "ghcr.io/henres/saunafs-container/saunafs-master:5.9.0"
 	}
 
 	// Total replicas: 1 primary + N shadows.
@@ -2306,5 +2529,40 @@ func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&coordinationv1.Lease{}).
+		// Watch PVs with the localdisk label to trigger reconciliation when
+		// new disks are discovered by the localdisk-operator.
+		Watches(&corev1.PersistentVolume{}, handler.EnqueueRequestsFromMapFunc(r.pvToClusterRequests)).
 		Complete(r)
+}
+
+// pvToClusterRequests maps a PV change to reconcile requests for all
+// SaunaFSCluster resources that have autoDiscover enabled.
+func (r *SaunaFSClusterReconciler) pvToClusterRequests(ctx context.Context, obj client.Object) []ctrl.Request {
+	pv, ok := obj.(*corev1.PersistentVolume)
+	if !ok {
+		return nil
+	}
+	// Only trigger for PVs with localdisk labels.
+	if _, hasLabel := pv.Labels["localdisk-operator.io/disk"]; !hasLabel {
+		return nil
+	}
+
+	// List all SaunaFSCluster resources.
+	clusterList := &saunafsv1alpha1.SaunaFSClusterList{}
+	if err := r.List(ctx, clusterList); err != nil {
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for _, cluster := range clusterList.Items {
+		if cluster.Spec.Chunk.AutoDiscover != nil && cluster.Spec.Chunk.AutoDiscover.Enabled {
+			requests = append(requests, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      cluster.Name,
+					Namespace: cluster.Namespace,
+				},
+			})
+		}
+	}
+	return requests
 }

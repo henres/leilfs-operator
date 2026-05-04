@@ -34,8 +34,10 @@ Forget this and the CRD YAML will be stale.
 
 ### 5. End-to-end / integration (if the change touches HA or reconcile logic)
 ```sh
-make kind-load
-kubectl rollout restart deployment/saunafs-operator-controller-manager -n saunafs-operator-system
+make docker-build IMG=ghcr.io/henres/saunafs-operator/saunafs-operator:dev
+bash ../sfs-test-env/scripts/load-images.sh
+kubectl --context sfs-lima -n saunafs-operator-system \
+  rollout restart deployment/saunafs-operator-controller-manager
 bash test/master-failover.sh
 ```
 
@@ -66,6 +68,8 @@ This repo uses **Conventional Commits**: `type(scope): short description`
 | `rbac` | Roles, RoleBindings, ServiceAccounts |
 | `crd` | API types, printcolumns, status fields |
 | `plugin` | kubectl-saunafs plugin |
+| `metrics` | Prometheus metrics emitted by the operator |
+| `monitoring` | ServiceMonitor, Grafana dashboards, monitoring Makefile targets |
 | `ci` | GitHub Actions, Makefile |
 
 ### Examples from this repo
@@ -75,12 +79,16 @@ feat(ha): unified master StatefulSet with automatic failover and failback
 fix(ha): correct holderIdentity parsing and propagate imagePullSecrets to master SA
 fix(ha): harden master HA — expose selector, storage precedence, RBAC scope, observability
 test(plugin): add filegoal smoke tests (get, set, error case)
-chore: remove unused start-kind-lab.sh script
+feat(monitoring): add Grafana dashboard for SaunaFS clusters
+chore(metrics): drop kube-rbac-proxy sidecar
+fix(rbac): grant pods:delete to the controller
 ```
 
 ### Rules
 - Subject line: max ~72 characters, imperative mood, no trailing period
-- Body (optional): explain **why**, not what. Wrap at 72 chars.
+- Body (when the change is non-trivial): explain **why** the change is
+  needed and any subtle behaviour the diff alone does not convey.
+  Multi-paragraph is fine; wrap at ~72 chars.
 - Do not use `--no-verify`; do not skip hooks.
 
 ---

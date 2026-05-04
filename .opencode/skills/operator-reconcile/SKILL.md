@@ -107,6 +107,30 @@ Defined in `api/v1alpha1/saunafscluster_types.go`:
 **Always run `make manifests` after changing API types** to regenerate
 `config/crd/bases/saunafs.saunafs-operator.io_saunafsclusters.yaml`.
 
+## Controller-level RBAC
+
+The operator's own ClusterRole is also generated, from
+`+kubebuilder:rbac:` annotations on the controller methods. To grant
+new cluster-scoped permissions, add an annotation above the relevant
+reconciler and re-run `make manifests`.
+
+Example (controller needs to delete Pods to drive rolling restarts):
+
+```go
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+func (r *SaunaFSClusterReconciler) reconcileSomething(...) { ... }
+```
+
+Then `make manifests` updates `config/rbac/role.yaml` and
+`kubectl apply -f config/rbac/role.yaml` deploys the change. Do NOT
+hand-edit `role.yaml`; the next `make manifests` run will overwrite
+edits.
+
+The Role created by `reconcileMasterHARBAC` (the per-cluster Role
+bound to the master ServiceAccount, scoped via `resourceNames`) is a
+**different** RBAC object — that one IS managed in code, not via
+kubebuilder annotations.
+
 ## Known API gaps (backlog)
 
 These fields are declared in the API types but are NOT used in the controller:

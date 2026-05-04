@@ -1517,8 +1517,18 @@ EXPORT
 							// ensures rpcbind is ready before Ganesha registers its
 							// RPCv3 programs. The `|| true` guard prevents a
 							// non-zero exit from aborting the shell.
+							//
+							// `ulimit -n 1048576` raises the per-process NOFILE
+							// limit before the daemons start. With the default
+							// soft limit (1024), ntirpc occasionally fails to
+							// register a transport via epoll_ctl with EBADF when
+							// its sentinel/control fd ends up on or above 1024.
+							// 1048576 is the value recommended by the
+							// nfs-ganesha project (LimitNOFILE in their systemd
+							// unit) and matches what most production deployments
+							// use.
 							Command: []string{"sh", "-c",
-								"rpcbind -f & sleep 2; ganesha.nfsd -F -f /etc/ganesha/ganesha.conf -N NIV_WARN -L /dev/stdout",
+								"ulimit -n 1048576; rpcbind -f & sleep 2; ganesha.nfsd -F -f /etc/ganesha/ganesha.conf -N NIV_WARN -L /dev/stdout",
 							},
 							SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
 							Ports: []corev1.ContainerPort{

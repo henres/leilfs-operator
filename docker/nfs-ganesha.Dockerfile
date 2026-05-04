@@ -8,8 +8,8 @@
 # dlopen to fail. Ganesha v9.2 ships ntirpc as a bundled submodule that DOES
 # export the symbol — so we must build from source.
 
-# GANESHA_VERSION: git tag of nfs-ganesha to build (e.g. V9.2)
-ARG GANESHA_VERSION=V9.2
+# GANESHA_VERSION: git tag of nfs-ganesha to build (e.g. V9.11)
+ARG GANESHA_VERSION=V9.11
 
 FROM ubuntu:24.04 AS ganesha-builder
 ARG GANESHA_VERSION
@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Download ganesha ${GANESHA_VERSION} + its pinned ntirpc submodule commit via wget (avoids
 # git SSL issues in restricted build environments). ntirpc commit pinned by
-# ganesha V9.2: 366b5c3c1f8cb4090df942ce57e9913be96406a9
+# ganesha V9.11 (same as V9.2): 366b5c3c1f8cb4090df942ce57e9913be96406a9
 # -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu pins the FSAL destination to
 # /usr/lib/x86_64-linux-gnu/ganesha/ — the same path the SaunaFS apt package
 # uses — so no symlink juggling is needed in the runtime stage.
@@ -120,8 +120,9 @@ COPY --from=ganesha-builder /tmp/ganesha-install/usr/ /usr/
 COPY --from=ganesha-builder /tmp/ganesha-install/etc/ /etc/
 
 # Install SaunaFS lib-client + FSAL from the official SaunaFS apt repo.
-# saunafs-nfs-ganesha 5.6.0 is compiled against Ganesha v9.2 — same version
-# as above — so the ABI (including default_mutex_attr from bundled ntirpc) matches.
+# saunafs-nfs-ganesha is compiled against the Ganesha v9 ABI (including
+# default_mutex_attr from bundled ntirpc), which V9.11 still ships via the
+# same ntirpc commit pinned above.
 RUN mkdir -p /root/.gnupg && chmod 700 /root/.gnupg \
     && update-ca-certificates \
     && gpg --no-default-keyring \

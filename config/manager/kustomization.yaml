@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/henres/saunafs-operator/saunafs-operator
-  newTag: latest
+  newTag: dev

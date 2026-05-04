@@ -1,18 +1,12 @@
-# Scrape the saunafs-operator manager metrics endpoint exposed by
-# kube-rbac-proxy on port 8443 (HTTPS, bearer token auth).
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: saunafs-operator-prom-metrics-reader
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: saunafs-operator-metrics-reader
-subjects:
-  - kind: ServiceAccount
-    name: kube-prom-stack-kube-prome-prometheus
-    namespace: monitoring
+# Scrape the saunafs-operator manager metrics endpoint exposed over
+# plain HTTP on port 8080. We deliberately drop the kube-rbac-proxy
+# sidecar to keep the dev/lab setup minimal — front it with a proper
+# auth proxy in production.
+#
+# The `release: kube-prom-stack` label matches the default
+# serviceMonitorSelector applied by the kube-prometheus-stack Helm
+# chart, so Prometheus will discover and scrape this target out of
+# the box.
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -21,6 +15,7 @@ metadata:
   namespace: monitoring
   labels:
     app.kubernetes.io/part-of: saunafs-operator
+    release: kube-prom-stack
 spec:
   namespaceSelector:
     matchNames:
@@ -29,10 +24,7 @@ spec:
     matchLabels:
       control-plane: controller-manager
   endpoints:
-    - port: https
-      scheme: https
+    - port: metrics
+      scheme: http
       path: /metrics
       interval: 30s
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tlsConfig:
-        insecureSkipVerify: true

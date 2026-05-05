@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "saunafs-operator.fullname" . }}-controller-manager
+  name: {{ include "leilfs-operator.fullname" . }}-controller-manager
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "saunafs-operator.labels" . | nindent 4 }}
+    {{- include "leilfs-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: manager
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "saunafs-operator.selectorLabels" . | nindent 6 }}
+      {{- include "leilfs-operator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -19,19 +19,19 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "saunafs-operator.selectorLabels" . | nindent 8 }}
+        {{- include "leilfs-operator.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "saunafs-operator.serviceAccountName" . }}
+      serviceAccountName: {{ include "leilfs-operator.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: {{ include "saunafs-operator.image" . }}
+          image: {{ include "leilfs-operator.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /manager

@@ -19,7 +19,7 @@ services:
     build:
       context: ..
       dockerfile: docker/operator.Dockerfile
-    image: ghcr.io/henres/saunafs-operator/saunafs-operator:${OPERATOR_IMAGE_TAG:-latest}
+    image: ghcr.io/henres/leilfs-operator/saunafs-operator:${OPERATOR_IMAGE_TAG:-latest}
 
   nfs-ganesha:
     build:
@@ -27,4 +27,4 @@ services:
       dockerfile: nfs-ganesha.Dockerfile
       args:
         GANESHA_VERSION: V9.8
-    image: ghcr.io/henres/saunafs-operator/nfs-ganesha:9.8
+    image: ghcr.io/henres/leilfs-operator/nfs-ganesha:9.8

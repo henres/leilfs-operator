@@ -91,10 +91,10 @@ func runTopology(opts *rootOptions, name string) error {
 		fmt.Println("  Node selector: <none>")
 	}
 
-	// Master pods: label app.kubernetes.io/name=saunafs-master + instance=<cluster>
+	// Master pods: label app.kubernetes.io/name=leilfs-master + instance=<cluster>
 	masterPods, err := k8sClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf(
-			"app.kubernetes.io/name=saunafs-master,app.kubernetes.io/instance=%s", name),
+			"app.kubernetes.io/name=leilfs-master,app.kubernetes.io/instance=%s", name),
 	})
 	if err == nil && len(masterPods.Items) > 0 {
 		fmt.Println("  Pods:")
@@ -163,13 +163,13 @@ func runTopology(opts *rootOptions, name string) error {
 		}
 
 		// Query pod status via the labels applied by the controller:
-		//   app.kubernetes.io/name=saunafs-chunkserver
+		//   app.kubernetes.io/name=leilfs-chunkserver
 		//   app.kubernetes.io/instance=<cluster>
-		//   saunafs.io/chunk-server=<srv-name>
+		//   leilfs.io/chunk-server=<srv-name>
 		podStatus := "<unknown>"
 		pods, podErr := k8sClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf(
-				"app.kubernetes.io/name=saunafs-chunkserver,app.kubernetes.io/instance=%s,saunafs.io/chunk-server=%s",
+				"app.kubernetes.io/name=leilfs-chunkserver,app.kubernetes.io/instance=%s,leilfs.io/chunk-server=%s",
 				name, sName),
 		})
 		if podErr == nil && len(pods.Items) > 0 {

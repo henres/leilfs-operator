@@ -1,11 +1,11 @@
-# Default values for saunafs-operator.
+# Default values for leilfs-operator.
 
 # -- Number of replicas for the operator deployment
 replicaCount: 1
 
 image:
   # -- Operator container image repository
-  repository: ghcr.io/henres/saunafs-operator
+  repository: ghcr.io/henres/leilfs-operator
   # -- Image pull policy
   pullPolicy: IfNotPresent
   # -- Image tag (defaults to Chart appVersion)

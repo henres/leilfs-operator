@@ -151,30 +151,30 @@ func resolveLogTarget(
 
 	// Labels applied by the controller (see reconcileMasterDaemonSet,
 	// reconcileChunkStatefulSet, reconcileNFS, reconcileInterface):
-	//   app.kubernetes.io/name     = saunafs-master | saunafs-chunkserver | saunafs-nfs | saunafs-interface
+	//   app.kubernetes.io/name     = leilfs-master | leilfs-chunkserver | leilfs-nfs | leilfs-interface
 	//   app.kubernetes.io/instance = <cluster-name>
-	//   saunafs.io/chunk-server    = <srv-name>   (chunk pods only)
+	//   leilfs.io/chunk-server    = <srv-name>   (chunk pods only)
 	switch component {
 	case "master":
 		labelSelector = fmt.Sprintf(
-			"app.kubernetes.io/name=saunafs-master,app.kubernetes.io/instance=%s", clusterName)
-		containerName = "saunafs-master"
+			"app.kubernetes.io/name=leilfs-master,app.kubernetes.io/instance=%s", clusterName)
+		containerName = "leilfs-master"
 	case "chunk":
 		if serverName == "" {
 			return "", "", fmt.Errorf("--server is required when --component=chunk")
 		}
 		labelSelector = fmt.Sprintf(
-			"app.kubernetes.io/name=saunafs-chunkserver,app.kubernetes.io/instance=%s,saunafs.io/chunk-server=%s",
+			"app.kubernetes.io/name=leilfs-chunkserver,app.kubernetes.io/instance=%s,leilfs.io/chunk-server=%s",
 			clusterName, serverName)
-		containerName = "saunafs-chunkserver"
+		containerName = "leilfs-chunkserver"
 	case "nfs":
 		labelSelector = fmt.Sprintf(
-			"app.kubernetes.io/name=saunafs-nfs,app.kubernetes.io/instance=%s", clusterName)
+			"app.kubernetes.io/name=leilfs-nfs,app.kubernetes.io/instance=%s", clusterName)
 		containerName = "nfs-ganesha"
 	case "interface", "webui":
 		labelSelector = fmt.Sprintf(
-			"app.kubernetes.io/name=saunafs-interface,app.kubernetes.io/instance=%s", clusterName)
-		containerName = "saunafs-cgiserver"
+			"app.kubernetes.io/name=leilfs-interface,app.kubernetes.io/instance=%s", clusterName)
+		containerName = "leilfs-cgiserver"
 	default:
 		return "", "", fmt.Errorf("unknown component %q; valid values: master, chunk, nfs, interface", component)
 	}

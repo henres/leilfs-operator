@@ -583,15 +583,15 @@ spec:
                   type: object
                 type: array
               interface:
-                description: WebUI controls the optional CGI web interface (saunafs-cgiserver).
+                description: WebUI controls the optional CGI web interface (leilfs-cgiserver).
                 properties:
                   enabled:
                     description: Enabled controls whether the CGI interface Deployment
                       is created.
                     type: boolean
                   image:
-                    description: Image overrides the default saunafs-cgiserver image
-                      (ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest).
+                    description: Image overrides the default leilfs-cgiserver image
+                      (ghcr.io/henres/leilfs-container/leilfs-cgiserver:latest).
                     type: string
                   nodeSelector:
                     additionalProperties:
@@ -860,7 +860,7 @@ spec:
                   and maintains an up-to-date copy of the metadata journal.
                 properties:
                   image:
-                    description: Image overrides the default saunafs-metalogger container
+                    description: Image overrides the default leilfs-metalogger container
                       image.
                     type: string
                   metadataStorage:

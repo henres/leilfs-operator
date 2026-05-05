@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: saunafsclusters.saunafs.saunafs-operator.io
+  name: leilfsclusters.leilfs.leilfs-operator.io
 spec:
-  group: saunafs.saunafs-operator.io
+  group: leilfs.leilfs-operator.io
   names:
-    kind: SaunaFSCluster
-    listKind: SaunaFSClusterList
-    plural: saunafsclusters
-    singular: saunafscluster
+    kind: LeilFSCluster
+    listKind: LeilFSClusterList
+    plural: leilfsclusters
+    singular: leilfscluster
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -23,6 +23,14 @@ spec:
       jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - description: Pod currently holding the master Lease
+      jsonPath: .status.activeMaster
+      name: ActiveMaster
+      type: string
+    - description: Number of ready shadow replicas
+      jsonPath: .status.readyShadows
+      name: Shadows
+      type: integer
     - description: Ready chunk server count
       jsonPath: .status.readyChunkServers
       name: ChunkServers
@@ -33,7 +41,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: SaunaFSCluster is the Schema for the saunafsclusters API
+        description: LeilFSCluster is the Schema for the leilfsclusters API
         properties:
           apiVersion:
             description: |-
@@ -53,12 +61,129 @@ spec:
           metadata:
             type: object
           spec:
-            description: SaunaFSClusterSpec defines the desired state of SaunaFSCluster
+            description: LeilFSClusterSpec defines the desired state of LeilFSCluster
             properties:
               chunk:
                 description: Chunk holds defaults shared by all chunk servers and
                   the per-server list.
                 properties:
+                  autoDiscover:
+                    description: |-
+                      AutoDiscover enables automatic discovery of PersistentVolumes created by
+                      the localdisk-operator. When enabled, the controller watches PVs matching
+                      the given label selector and automatically creates one chunkserver
+                      StatefulSet per discovered disk (PV). This is additive with Servers.
+                    properties:
+                      enabled:
+                        description: Enabled turns auto-discovery on or off.
+                        type: boolean
+                      pvLabelSelector:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          PVLabelSelector selects PersistentVolumes to use as chunk storage.
+                          Example: {"localdisk-operator.io/node": ""} matches all localdisk PVs.
+                          If empty and Enabled is true, defaults to {"localdisk-operator.io/disk": ""}.
+                        type: object
+                      resources:
+                        description: Resources overrides the default resource requirements
+                          for auto-discovered chunkservers.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+
+                              This is an alpha field and requires enabling the
+                              DynamicResourceAllocation feature gate.
+
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      tolerations:
+                        description: Tolerations applied to all auto-discovered chunkserver
+                          pods.
+                        items:
+                          description: |-
+                            The pod this Toleration is attached to tolerates any taint that matches
+                            the triple <key,value,effect> using the matching operator <operator>.
+                          properties:
+                            effect:
+                              description: |-
+                                Effect indicates the taint effect to match. Empty means match all taint effects.
+                                When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                              type: string
+                            key:
+                              description: |-
+                                Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                                If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                              type: string
+                            operator:
+                              description: |-
+                                Operator represents a key's relationship to the value.
+                                Valid operators are Exists and Equal. Defaults to Equal.
+                                Exists is equivalent to wildcard for value, so that a pod can
+                                tolerate all taints of a particular category.
+                              type: string
+                            tolerationSeconds:
+                              description: |-
+                                TolerationSeconds represents the period of time the toleration (which must be
+                                of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                                it is not set, which means tolerate the taint forever (do not evict). Zero and
+                                negative values will be treated as 0 (evict immediately) by the system.
+                              format: int64
+                              type: integer
+                            value:
+                              description: |-
+                                Value is the taint value the toleration matches to.
+                                If the operator is Exists, the value should be empty, otherwise just a regular string.
+                              type: string
+                          type: object
+                        type: array
+                    required:
+                    - enabled
+                    type: object
                   image:
                     description: Image is the default container image used for all
                       chunk servers.
@@ -86,6 +211,13 @@ spec:
                         image:
                           description: Image overrides the default chunk image for
                             this server only.
+                          type: string
+                        label:
+                          description: |-
+                            Label is the LABEL value written into sfschunkserver.cfg.
+                            It is used by LeilFS storage goals to pin chunks to specific servers
+                            (e.g. one label per physical node ensures node-level data spreading).
+                            When empty, no LABEL line is written and the chunkserver is anonymous.
                           type: string
                         mountPaths:
                           description: MountPaths lists the host paths or PVC mount
@@ -229,10 +361,7 @@ spec:
                       - name
                       - nodeName
                       type: object
-                    minItems: 1
                     type: array
-                required:
-                - servers
                 type: object
               csi:
                 description: CSI controls the optional CSI driver deployment.
@@ -347,7 +476,7 @@ spec:
                 type: object
               expose:
                 description: |-
-                  Expose controls optional NodePort exposure so that external SaunaFS
+                  Expose controls optional NodePort exposure so that external LeilFS
                   clients (saunafs-client) can mount the filesystem from outside the cluster.
                 properties:
                   adminNodePort:
@@ -359,7 +488,7 @@ spec:
                     type: integer
                   clientNodePort:
                     description: |-
-                      ClientNodePort is the NodePort assigned to the SaunaFS client port (9421).
+                      ClientNodePort is the NodePort assigned to the LeilFS client port (9421).
                       When 0 (the default) Kubernetes assigns a random port in the NodePort range.
                     format: int32
                     maximum: 32767
@@ -368,19 +497,101 @@ spec:
                   enabled:
                     description: |-
                       Enabled controls whether a NodePort Service is created so that external
-                      SaunaFS clients can connect to the master and mount the filesystem.
+                      LeilFS clients can connect to the master and mount the filesystem.
                     type: boolean
                 type: object
+              goals:
+                description: |-
+                  Goals defines custom storage goals written to sfsgoals.cfg on the master.
+                  Each entry produces one line in the file; the master reads it at startup.
+                  If omitted, LeilFS uses its built-in defaults (goals 1–9).
+                  Goals with IDs 1–9 override the built-in ones; IDs 10–20 are purely
+                  custom. The first entry flagged with Default=true is applied as the
+                  cluster-wide default goal via the master configuration.
+                items:
+                  description: "GoalSpec defines one LeilFS storage goal written to
+                    sfsgoals.cfg.\nExactly one of Replication or EC must be set.\n\n\nBuilt-in
+                    LeilFS goals use IDs 1–9; custom goals should use 10–20.\n\n\nExamples:\n\n\n\t{
+                    id: 2, name: \"two_copies\",  replication: 2 }\n\t{ id: 10, name:
+                    \"ec_4_2\", ec: { dataParts: 4, parityParts: 2 }, default: true
+                    }\n\t{ id: 11, name: \"node_spread\", replication: 3, nodeLabels:
+                    [\"node1\", \"node2\", \"node3\"] }"
+                  properties:
+                    default:
+                      description: |-
+                        Default marks this goal as the cluster-wide default.
+                        At most one goal should set Default=true; the operator writes
+                        SFSMASTER_DEFAULT_GOAL=<Name> in sfsmaster.cfg.
+                      type: boolean
+                    ec:
+                      description: |-
+                        EC defines an erasure-coding goal.
+                        Mutually exclusive with Replication.
+                      properties:
+                        dataParts:
+                          description: DataParts is the number of data fragments (k
+                            in ec(k,m)).
+                          format: int32
+                          minimum: 2
+                          type: integer
+                        parityParts:
+                          description: ParityParts is the number of parity/redundancy
+                            fragments (m in ec(k,m)).
+                          format: int32
+                          minimum: 1
+                          type: integer
+                      required:
+                      - dataParts
+                      - parityParts
+                      type: object
+                    id:
+                      description: |-
+                        ID is the numeric identifier for this goal (1–20).
+                        LeilFS built-in goals occupy IDs 1–9.
+                      format: int32
+                      maximum: 20
+                      minimum: 1
+                      type: integer
+                    name:
+                      description: |-
+                        Name is the human-readable label used in sfsgoals.cfg.
+                        Must contain only alphanumeric characters, hyphens, or underscores.
+                      pattern: ^[a-zA-Z0-9_-]+$
+                      type: string
+                    nodeLabels:
+                      description: |-
+                        NodeLabels constrains replication copies to specific chunkserver labels.
+                        When set, each element corresponds to one copy and must match the LABEL
+                        set in sfschunkserver.cfg on the target chunkserver. The pattern becomes
+                        "{ label1 _ } { label2 _ } …" instead of anonymous underscores.
+                        The number of NodeLabels entries must equal Replication when both are set.
+                        Ignored when EC is set.
+                      items:
+                        type: string
+                      type: array
+                    replication:
+                      description: |-
+                        Replication is the number of copies to maintain.
+                        Mutually exclusive with EC.
+                      format: int32
+                      maximum: 20
+                      minimum: 1
+                      type: integer
+                  required:
+                  - id
+                  - name
+                  type: object
+                type: array
               interface:
-                description: WebUI controls the optional CGI web interface (saunafs-cgiserver).
+                description: WebUI controls the optional CGI web interface (leilfs-cgiserver).
                 properties:
                   enabled:
                     description: Enabled controls whether the CGI interface Deployment
                       is created.
                     type: boolean
                   image:
-                    description: Image overrides the default saunafs-cgiserver:latest
-                      image.
+                    description: Image overrides the default leilfs-cgiserver image
+                      (ghcr.io/henres/leilfs-container/leilfs-cgiserver:latest).
                     type: string
                   nodeSelector:
                     additionalProperties:
@@ -500,6 +711,27 @@ spec:
                 properties:
                   image:
                     type: string
+                  metadataStorage:
+                    description: |-
+                      MetadataStorage configures the PVC used to persist /var/lib/saunafs.
+                      If omitted, a default 1Gi PVC is created automatically.
+                    properties:
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 1Gi
+                        description: |-
+                          Size is the storage capacity requested for the metadata PVC.
+                          Defaults to "1Gi".
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: |-
+                          StorageClassName is the name of the StorageClass to use for the metadata PVC.
+                          Defaults to "" (cluster default StorageClass).
+                        type: string
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -575,7 +807,153 @@ spec:
                     description: Service Type string describes ingress methods for
                       a service
                     type: string
+                  startupGracePeriod:
+                    description: |-
+                      StartupGracePeriod is how long the ha-sidecar waits after pod start
+                      before it begins monitoring sfsmaster health via pgrep. This covers
+                      the time needed to load metadata (proportional to filesystem size).
+                      Defaults to 30s. Increase for large filesystems with many inodes.
+                    type: string
                   tolerations:
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
+              metalogger:
+                description: |-
+                  Metaloggers configures optional metalogger instances that shadow the
+                  master metadata (warm standby). Each metalogger connects to the master
+                  and maintains an up-to-date copy of the metadata journal.
+                properties:
+                  image:
+                    description: Image overrides the default leilfs-metalogger container
+                      image.
+                    type: string
+                  metadataStorage:
+                    description: |-
+                      MetadataStorage configures the PVC template used by the metalogger
+                      StatefulSet to persist its copy of the metadata journal.
+                      Each replica gets its own PVC.
+                    properties:
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 1Gi
+                        description: |-
+                          Size is the storage capacity requested for the metadata PVC.
+                          Defaults to "1Gi".
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: |-
+                          StorageClassName is the name of the StorageClass to use for the metadata PVC.
+                          Defaults to "" (cluster default StorageClass).
+                        type: string
+                    type: object
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector for metalogger pods.
+                    type: object
+                  replicas:
+                    default: 0
+                    description: Replicas is the number of metalogger instances (default
+                      0 = disabled).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  resources:
+                    description: Resources for the metalogger container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tolerations:
+                    description: Tolerations for metalogger pods.
                     items:
                       description: |-
                         The pod this Toleration is attached to tolerates any taint that matches
@@ -616,7 +994,7 @@ spec:
                 type: object
               nfs:
                 description: |-
-                  NFS controls an optional NFS-Ganesha gateway that re-exports the SaunaFS
+                  NFS controls an optional NFS-Ganesha gateway that re-exports the LeilFS
                   filesystem over standard NFS (port 2049). Any NFS client can then mount
                   the filesystem without installing saunafs-client.
                 properties:
@@ -625,13 +1003,13 @@ spec:
                       and Service are created.
                     type: boolean
                   exportPath:
-                    description: ExportPath is the SaunaFS path to export (default
+                    description: ExportPath is the LeilFS path to export (default
                       "/").
                     type: string
                   image:
                     description: |-
                       Image is the NFS-Ganesha container image to use.
-                      Must include the SaunaFS FSAL (saunafs-nfs-ganesha package).
+                      Must include the LeilFS FSAL (saunafs-nfs-ganesha package).
                     type: string
                   nodePort:
                     description: |-
@@ -754,10 +1132,158 @@ spec:
                       type: object
                     type: array
                 type: object
+              shadow:
+                description: |-
+                  Shadow configures optional shadow master instances. Shadow masters run
+                  with PERSONALITY=shadow and stay fully in sync with the active master via
+                  the metadata changelog stream. The operator manages a Kubernetes Lease to
+                  perform automatic leader election: if the active master pod becomes
+                  unavailable the operator promotes the most up-to-date shadow to master,
+                  updates the master Service selector, and demotes the recovered pod to
+                  shadow — preventing split-brain.
+                properties:
+                  image:
+                    description: Image overrides the container image (defaults to
+                      the same image as Master).
+                    type: string
+                  metadataStorage:
+                    description: |-
+                      MetadataStorage configures the PVC template used by each shadow replica
+                      to persist its local copy of the metadata. Each replica gets its own PVC.
+                    properties:
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 1Gi
+                        description: |-
+                          Size is the storage capacity requested for the metadata PVC.
+                          Defaults to "1Gi".
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: |-
+                          StorageClassName is the name of the StorageClass to use for the metadata PVC.
+                          Defaults to "" (cluster default StorageClass).
+                        type: string
+                    type: object
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector for shadow pods.
+                    type: object
+                  replicas:
+                    default: 1
+                    description: Replicas is the number of shadow instances (default
+                      1).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: Resources for the shadow container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tolerations:
+                    description: Tolerations for shadow pods.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
             type: object
           status:
-            description: SaunaFSClusterStatus defines the observed state of SaunaFSCluster.
+            description: LeilFSClusterStatus defines the observed state of LeilFSCluster.
             properties:
+              activeMaster:
+                description: |-
+                  ActiveMaster is the name of the pod currently holding the master role
+                  (either the primary master pod or a promoted shadow pod).
+                  Empty if no active master is known.
+                type: string
               conditions:
                 description: |-
                   Conditions holds the latest observed conditions of the cluster.
@@ -838,6 +1364,16 @@ spec:
                 description: |-
                   ReadyChunkServers is the number of chunk-server StatefulSets whose
                   desired replicas are all ready.
+                format: int32
+                type: integer
+              readyMetaloggers:
+                description: ReadyMetaloggers is the number of ready metalogger replicas.
+                format: int32
+                type: integer
+              readyShadows:
+                description: |-
+                  ReadyShadows is the number of shadow master replicas that are Ready and
+                  connected to the active master.
                 format: int32
                 type: integer
               totalChunkServers:

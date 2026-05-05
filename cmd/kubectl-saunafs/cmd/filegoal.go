@@ -85,7 +85,7 @@ Examples:
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false,
 		"Recurse into subdirectories")
 	cmd.Flags().StringVar(&clientImage, "client-image", "",
-		"Override the saunafs-client image (default: value from spec.csi.image or saunafs-client:latest)")
+		"Override the leilfs-client image (default: value from spec.csi.image or leilfs-client:latest)")
 
 	return cmd
 }
@@ -148,7 +148,7 @@ Examples:
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false,
 		"Recurse into subdirectories")
 	cmd.Flags().StringVar(&clientImage, "client-image", "",
-		"Override the saunafs-client image (default: value from spec.csi.image or saunafs-client:latest)")
+		"Override the leilfs-client image (default: value from spec.csi.image or leilfs-client:latest)")
 
 	return cmd
 }
@@ -236,7 +236,7 @@ func runFUSEPod(
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:            "saunafs-client",
+					Name:            "leilfs-client",
 					Image:           image,
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Command:         []string{"sh", "-c", script},
@@ -266,7 +266,7 @@ func runFUSEPod(
 		return fmt.Errorf("creating filegoal pod: %w", err)
 	}
 
-	return streamAndWaitPod(ctx, k8s, ns, podName, "saunafs-client")
+	return streamAndWaitPod(ctx, k8s, ns, podName, "leilfs-client")
 }
 
 // prepareFileGoalRun resolves clients, namespace, client image and master
@@ -309,7 +309,7 @@ func prepareFileGoalRun(opts *rootOptions, clusterName, clientImageOverride stri
 		clientImage = extractString(clusterObj.Object, "spec", "csi", "image")
 	}
 	if clientImage == "" {
-		clientImage = "saunafs-client:latest"
+		clientImage = "leilfs-client:latest"
 	}
 
 	masterSvcName = fmt.Sprintf("%s-master", clusterName)

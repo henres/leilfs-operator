@@ -33,7 +33,7 @@ set -euo pipefail
 
 KUBE="kubectl --context kind-saunafs-operator"
 NS="default"
-CLUSTER="saunafscluster-sample"
+CLUSTER="leilfscluster-sample"
 MASTER_STS="${CLUSTER}-master"
 LEASE_NAME="${CLUSTER}-master-ha"
 METALOGGER_STS="${CLUSTER}-metalogger"

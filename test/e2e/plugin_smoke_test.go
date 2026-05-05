@@ -30,7 +30,7 @@ package e2e
 // Optional env overrides:
 //
 //	PLUGIN_BIN      path to the plugin binary   (default: bin/kubectl-saunafs)
-//	PLUGIN_CLUSTER  LeilFSCluster name          (default: saunafscluster-sample)
+//	PLUGIN_CLUSTER  LeilFSCluster name          (default: leilfscluster-sample)
 //	PLUGIN_NS       namespace                    (default: default)
 
 import (
@@ -63,7 +63,7 @@ func pluginEnv() (bin, cluster, ns string) {
 	}
 	cluster = os.Getenv("PLUGIN_CLUSTER")
 	if cluster == "" {
-		cluster = "saunafscluster-sample"
+		cluster = "leilfscluster-sample"
 	}
 	ns = os.Getenv("PLUGIN_NS")
 	if ns == "" {

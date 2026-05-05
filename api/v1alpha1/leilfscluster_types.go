@@ -50,7 +50,7 @@ type LeilFSClusterSpec struct {
 	Goals []GoalSpec `json:"goals,omitempty"`
 	// CSI controls the optional CSI driver deployment.
 	CSI CSISpec `json:"csi,omitempty"`
-	// WebUI controls the optional CGI web interface (saunafs-cgiserver).
+	// WebUI controls the optional CGI web interface (leilfs-cgiserver).
 	WebUI WebUISpec `json:"interface,omitempty"`
 	// Expose controls optional NodePort exposure so that external LeilFS
 	// clients (saunafs-client) can mount the filesystem from outside the cluster.
@@ -228,7 +228,7 @@ type MetaloggerSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=0
 	Replicas *int32 `json:"replicas,omitempty"`
-	// Image overrides the default saunafs-metalogger container image.
+	// Image overrides the default leilfs-metalogger container image.
 	Image string `json:"image,omitempty"`
 	// MetadataStorage configures the PVC template used by the metalogger
 	// StatefulSet to persist its copy of the metadata journal.
@@ -323,11 +323,11 @@ type CSISpec struct {
 	Resources          corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// WebUISpec defines the optional CGI web interface (saunafs-cgiserver) settings.
+// WebUISpec defines the optional CGI web interface (leilfs-cgiserver) settings.
 type WebUISpec struct {
 	// Enabled controls whether the CGI interface Deployment is created.
 	Enabled *bool `json:"enabled,omitempty"`
-	// Image overrides the default saunafs-cgiserver image (ghcr.io/henres/saunafs-container/saunafs-cgiserver:latest).
+	// Image overrides the default leilfs-cgiserver image (ghcr.io/henres/leilfs-container/leilfs-cgiserver:latest).
 	Image string `json:"image,omitempty"`
 	// Replicas is the number of cgiserver pods (defaults to 1).
 	Replicas *int32 `json:"replicas,omitempty"`

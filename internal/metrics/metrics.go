@@ -1,5 +1,5 @@
 // Package metrics defines Prometheus collectors exposed by the
-// saunafs-operator controller-manager. These metrics complement the
+// leilfs-operator controller-manager. These metrics complement the
 // default controller-runtime metrics with cluster-level observability
 // derived from the LeilFSCluster resources reconciled by this operator.
 package metrics

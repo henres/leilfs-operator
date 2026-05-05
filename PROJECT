@@ -5,7 +5,7 @@
 domain: leilfs-operator.io
 layout:
 - go.kubebuilder.io/v4
-projectName: saunafs-operator
+projectName: leilfs-operator
 repo: github.com/henres/leilfs-operator
 resources:
 - api:

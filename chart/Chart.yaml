@@ -1,16 +1,16 @@
 apiVersion: v2
-name: saunafs-operator
-description: Kubernetes operator for managing SaunaFS distributed filesystem clusters
+name: leilfs-operator
+description: Kubernetes operator for managing LeilFS distributed filesystem clusters
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
 keywords:
-  - saunafs
+  - leilfs
   - distributed-filesystem
   - storage
   - operator
-home: https://github.com/henres/saunafs-operator
+home: https://github.com/henres/leilfs-operator
 sources:
-  - https://github.com/henres/saunafs-operator
+  - https://github.com/henres/leilfs-operator
 maintainers:
   - name: Henri Dauvigny

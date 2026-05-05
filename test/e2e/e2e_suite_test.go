@@ -27,6 +27,6 @@ import (
 // Run e2e tests using the Ginkgo runner.
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	fmt.Fprintf(GinkgoWriter, "Starting saunafs-operator suite\n")
+	fmt.Fprintf(GinkgoWriter, "Starting leilfs-operator suite\n")
 	RunSpecs(t, "e2e suite")
 }

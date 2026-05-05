@@ -43,7 +43,7 @@ Because saunafs-admin is part of the saunafs-client package (not installed in
 the master image), this command spins up a short-lived Pod using the client
 image, runs saunafs-admin there, streams the output, then deletes the Pod.
 
-The client image is read from spec.csi.image (usually saunafs-client:latest).
+The client image is read from spec.csi.image (usually leilfs-client:latest).
 Override it with --client-image if needed.
 
 The master service hostname and port are resolved automatically from the
@@ -77,7 +77,7 @@ automatically from the LeilFSCluster spec.`,
 	}
 
 	cmd.Flags().StringVar(&clientImage, "client-image", "",
-		"Override the saunafs-client image used for the ephemeral pod (default: value from spec.csi.image or saunafs-client:latest)")
+		"Override the leilfs-client image used for the ephemeral pod (default: value from spec.csi.image or leilfs-client:latest)")
 
 	return cmd
 }
@@ -124,7 +124,7 @@ func runAdmin(opts *rootOptions, args []string, clientImageOverride string) erro
 		clientImage = extractString(clusterObj.Object, "spec", "csi", "image")
 	}
 	if clientImage == "" {
-		clientImage = "saunafs-client:latest"
+		clientImage = "leilfs-client:latest"
 	}
 
 	// Determine master service hostname and client port.
@@ -151,7 +151,7 @@ func runAdmin(opts *rootOptions, args []string, clientImageOverride string) erro
 	// Argument order: saunafs-admin COMMAND [OPTIONS] <master-ip> <port>
 	// The host and port are appended after the user-supplied subcommand and
 	// its options (i.e. adminArgs already contains the subcommand first).
-	command := append([]string{"saunafs-admin"}, adminArgs...)
+	command := append([]string{"leilfs-admin"}, adminArgs...)
 	command = append(command, masterSvcName, fmt.Sprintf("%d", adminPort))
 
 	fmt.Fprintf(os.Stderr, "Using client image: %s\n", clientImage)
@@ -183,7 +183,7 @@ func runEphemeralPod(
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:            "saunafs-admin",
+					Name:            "leilfs-admin",
 					Image:           image,
 					Command:         command,
 					ImagePullPolicy: corev1.PullIfNotPresent,
@@ -196,7 +196,7 @@ func runEphemeralPod(
 	if err != nil {
 		return fmt.Errorf("creating ephemeral pod: %w", err)
 	}
-	return streamAndWaitPod(ctx, k8s, ns, createdPod.Name, "saunafs-admin")
+	return streamAndWaitPod(ctx, k8s, ns, createdPod.Name, "leilfs-admin")
 }
 
 // streamAndWaitPod waits for a pod to start, streams its logs to stdout, then

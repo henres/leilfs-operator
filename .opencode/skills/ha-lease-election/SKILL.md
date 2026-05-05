@@ -19,8 +19,8 @@ participates in the election.
 | ServiceAccount | `<cluster>-master` | Used by all pods in the StatefulSet |
 | Role | `<cluster>-master-ha` | leases get/update/patch + pods delete (resourceNames scoped) |
 | RoleBinding | `<cluster>-master-ha` | Binds Role to the SA |
-| Service (ClusterIP) | `<cluster>-master` | Selector: `saunafs.io/active-master=true` |
-| Service (NodePort) | `<cluster>-client-expose` | In HA mode also uses `saunafs.io/active-master=true` |
+| Service (ClusterIP) | `<cluster>-master` | Selector: `leilfs.io/active-master=true` |
+| Service (NodePort) | `<cluster>-client-expose` | In HA mode also uses `leilfs.io/active-master=true` |
 
 ## Lease parameters
 
@@ -96,7 +96,7 @@ Body: {"spec":{"holderIdentity":"$POD_NAME","renewTime":"<now>","leaseDurationSe
 - Creates the Lease at bootstrap (empty `holderIdentity`).
 - On every reconcile (every 5 s via `RequeueAfter`):
   - Reads Lease, extracts `holderIdentity`.
-  - Labels the holder pod with `saunafs.io/active-master=true`; removes label from others.
+  - Labels the holder pod with `leilfs.io/active-master=true`; removes label from others.
   - Updates the ClusterIP Service selector to match that label.
   - Updates `status.ActiveMaster` and `status.ReadyShadows`.
 

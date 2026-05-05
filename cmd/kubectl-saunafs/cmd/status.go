@@ -144,7 +144,7 @@ func runStatus(opts *rootOptions, name string) error {
 
 	// Master pods: list pods in the master StatefulSet by label.
 	masterPods, err := k8sClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=saunafs-master,app.kubernetes.io/instance=%s", name),
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=leilfs-master,app.kubernetes.io/instance=%s", name),
 	})
 	if err == nil {
 		for _, p := range masterPods.Items {
@@ -155,7 +155,7 @@ func runStatus(opts *rootOptions, name string) error {
 			targets = append(targets, versionTarget{
 				label:     label,
 				podName:   p.Name,
-				container: "saunafs-master",
+				container: "leilfs-master",
 				binary:    "sfsmaster",
 			})
 		}
@@ -173,7 +173,7 @@ func runStatus(opts *rootOptions, name string) error {
 		targets = append(targets, versionTarget{
 			label:     fmt.Sprintf("chunk/%s", sName),
 			podName:   podName,
-			container: "saunafs-chunkserver",
+			container: "leilfs-chunkserver",
 			binary:    "sfschunkserver",
 		})
 	}

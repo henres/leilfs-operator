@@ -1,9 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "saunafs-operator.fullname" . }}-manager-role
+  name: {{ include "leilfs-operator.fullname" . }}-manager-role
   labels:
-    {{- include "saunafs-operator.labels" . | nindent 4 }}
+    {{- include "leilfs-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: rbac
 rules:
   - apiGroups: [""]
@@ -18,15 +18,15 @@ rules:
       - deployments
       - statefulsets
     verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [saunafs.saunafs-operator.io]
+  - apiGroups: [leilfs.leilfs-operator.io]
     resources:
-      - saunafsclusters
+      - leilfsclusters
     verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [saunafs.saunafs-operator.io]
+  - apiGroups: [leilfs.leilfs-operator.io]
     resources:
-      - saunafsclusters/finalizers
+      - leilfsclusters/finalizers
     verbs: [update]
-  - apiGroups: [saunafs.saunafs-operator.io]
+  - apiGroups: [leilfs.leilfs-operator.io]
     resources:
-      - saunafsclusters/status
+      - leilfsclusters/status
     verbs: [get, patch, update]

@@ -1,22 +1,22 @@
-SaunaFS Operator has been deployed successfully!
+LeilFS Operator has been deployed successfully!
 
 Operator namespace : {{ .Release.Namespace }}
-Operator deployment: {{ include "saunafs-operator.fullname" . }}-controller-manager
+Operator deployment: {{ include "leilfs-operator.fullname" . }}-controller-manager
 
-The CRD "saunafsclusters.saunafs.saunafs-operator.io" is now registered.
-You can create a SaunaFSCluster resource to deploy a distributed SaunaFS cluster:
+The CRD "leilfsclusters.leilfs.leilfs-operator.io" is now registered.
+You can create a LeilFSCluster resource to deploy a distributed LeilFS cluster:
 
   kubectl apply -f - <<EOF
-  apiVersion: saunafs.saunafs-operator.io/v1alpha1
-  kind: SaunaFSCluster
+  apiVersion: leilfs.leilfs-operator.io/v1alpha1
+  kind: LeilFSCluster
   metadata:
     name: my-cluster
     namespace: {{ .Release.Namespace }}
   spec:
     master:
-      image: saunafs-master:latest
+      image: leilfs-master:latest
     chunk:
-      image: saunafs-chunkserver:latest
+      image: leilfs-chunkserver:latest
       servers:
         - name: chunk-0
           nodeName: <your-node-name>
@@ -27,4 +27,4 @@ You can create a SaunaFSCluster resource to deploy a distributed SaunaFS cluster
 
 Check the operator logs:
   kubectl logs -n {{ .Release.Namespace }} \
-    deploy/{{ include "saunafs-operator.fullname" . }}-controller-manager -c manager -f
+    deploy/{{ include "leilfs-operator.fullname" . }}-controller-manager -c manager -f

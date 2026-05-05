@@ -1,7 +1,7 @@
 
 # Image URLs for building/pushing
-IMG             ?= ghcr.io/henres/saunafs-operator/saunafs-operator:latest
-NFS_GANESHA_IMG ?= ghcr.io/henres/saunafs-operator/nfs-ganesha:latest
+IMG             ?= ghcr.io/henres/leilfs-operator/saunafs-operator:latest
+NFS_GANESHA_IMG ?= ghcr.io/henres/leilfs-operator/nfs-ganesha:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.29.0
 
@@ -71,11 +71,11 @@ test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
 # PLUGIN_BIN     - path to the plugin binary (default: bin/kubectl-saunafs)
-# PLUGIN_CLUSTER - SaunaFSCluster name to test against (default: saunafscluster-sample)
+# PLUGIN_CLUSTER - LeilFSCluster name to test against (default: leilfscluster-sample)
 # PLUGIN_NS      - namespace (default: default)
 # Requires a running Kind cluster: make kind-reset
 PLUGIN_BIN     ?= bin/kubectl-saunafs
-PLUGIN_CLUSTER ?= saunafscluster-sample
+PLUGIN_CLUSTER ?= leilfscluster-sample
 PLUGIN_NS      ?= default
 
 .PHONY: test-plugin

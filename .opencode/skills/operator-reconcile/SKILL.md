@@ -75,7 +75,7 @@ The list of pod names is derived from `spec.MasterSpec.Replicas`.
 ```go
 if haEnabled {
     selector = map[string]string{
-        "saunafs.io/active-master": "true",
+        "leilfs.io/active-master": "true",
     }
 } else {
     selector = map[string]string{
@@ -85,7 +85,7 @@ if haEnabled {
 ```
 
 Both the ClusterIP (`<cluster>-master`) and the NodePort (`<cluster>-client-expose`) services
-use `saunafs.io/active-master=true` in HA mode.
+use `leilfs.io/active-master=true` in HA mode.
 
 ## Status fields
 

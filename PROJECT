@@ -2,7 +2,7 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: saunafs-operator.io
+domain: leilfs-operator.io
 layout:
 - go.kubebuilder.io/v4
 projectName: saunafs-operator
@@ -12,7 +12,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: saunafs-operator.io
+  domain: leilfs-operator.io
   group: saunafs
   kind: SaunaFSCluster
   path: github.com/henres/leilfs-operator/api/v1alpha1

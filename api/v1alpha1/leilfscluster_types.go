@@ -400,7 +400,7 @@ type NamedPort struct {
 //+kubebuilder:printcolumn:name="ChunkServers",type="integer",JSONPath=".status.readyChunkServers",description="Ready chunk server count"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// LeilFSCluster is the Schema for the saunafsclusters API
+// LeilFSCluster is the Schema for the leilfsclusters API
 type LeilFSCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

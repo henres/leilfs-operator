@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: leilfsclusters.saunafs.saunafs-operator.io
+  name: leilfsclusters.leilfs.leilfs-operator.io
 spec:
-  group: saunafs.saunafs-operator.io
+  group: leilfs.leilfs-operator.io
   names:
     kind: LeilFSCluster
     listKind: LeilFSClusterList
@@ -41,7 +41,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: LeilFSCluster is the Schema for the saunafsclusters API
+        description: LeilFSCluster is the Schema for the leilfsclusters API
         properties:
           apiVersion:
             description: |-

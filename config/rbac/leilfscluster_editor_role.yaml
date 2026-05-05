@@ -1,20 +1,20 @@
-# permissions for end users to edit saunafsclusters.
+# permissions for end users to edit leilfsclusters.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: clusterrole
-    app.kubernetes.io/instance: saunafscluster-editor-role
+    app.kubernetes.io/instance: leilfscluster-editor-role
     app.kubernetes.io/component: rbac
     app.kubernetes.io/created-by: saunafs-operator
     app.kubernetes.io/part-of: saunafs-operator
     app.kubernetes.io/managed-by: kustomize
-  name: saunafscluster-editor-role
+  name: leilfscluster-editor-role
 rules:
 - apiGroups:
-  - saunafs.saunafs-operator.io
+  - leilfs.leilfs-operator.io
   resources:
-  - saunafsclusters
+  - leilfsclusters
   verbs:
   - create
   - delete
@@ -24,8 +24,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - saunafs.saunafs-operator.io
+  - leilfs.leilfs-operator.io
   resources:
-  - saunafsclusters/status
+  - leilfsclusters/status
   verbs:
   - get

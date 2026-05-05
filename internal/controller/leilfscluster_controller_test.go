@@ -40,11 +40,11 @@ var _ = Describe("LeilFSCluster Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		saunafscluster := &saunafsv1alpha1.LeilFSCluster{}
+		leilfscluster := &saunafsv1alpha1.LeilFSCluster{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind LeilFSCluster")
-			err := k8sClient.Get(ctx, typeNamespacedName, saunafscluster)
+			err := k8sClient.Get(ctx, typeNamespacedName, leilfscluster)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &saunafsv1alpha1.LeilFSCluster{
 					ObjectMeta: metav1.ObjectMeta{

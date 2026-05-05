@@ -30,9 +30,9 @@ import (
 )
 
 var saunafsClusterGVR = schema.GroupVersionResource{
-	Group:    "saunafs.saunafs-operator.io",
+	Group:    "leilfs.leilfs-operator.io",
 	Version:  "v1alpha1",
-	Resource: "saunafsclusters",
+	Resource: "leilfsclusters",
 }
 
 func newListCmd(opts *rootOptions) *cobra.Command {

@@ -1,4 +1,4 @@
-apiVersion: saunafs.saunafs-operator.io/v1alpha1
+apiVersion: leilfs.leilfs-operator.io/v1alpha1
 kind: LeilFSCluster
 metadata:
   labels:

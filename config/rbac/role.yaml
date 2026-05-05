@@ -65,6 +65,32 @@ rules:
   - update
   - watch
 - apiGroups:
+  - leilfs.leilfs-operator.io
+  resources:
+  - leilfsclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - leilfs.leilfs-operator.io
+  resources:
+  - leilfsclusters/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - leilfs.leilfs-operator.io
+  resources:
+  - leilfsclusters/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings
@@ -77,29 +103,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - saunafs.saunafs-operator.io
-  resources:
-  - saunafsclusters
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - saunafs.saunafs-operator.io
-  resources:
-  - saunafsclusters/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - saunafs.saunafs-operator.io
-  resources:
-  - saunafsclusters/status
-  verbs:
-  - get
-  - patch
-  - update

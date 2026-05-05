@@ -200,9 +200,9 @@ func masterPodAntiAffinity(stsName string) *corev1.Affinity {
 	}
 }
 
-//+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=saunafs.saunafs-operator.io,resources=saunafsclusters/finalizers,verbs=update
+//+kubebuilder:rbac:groups=leilfs.leilfs-operator.io,resources=leilfsclusters,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=leilfs.leilfs-operator.io,resources=leilfsclusters/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=leilfs.leilfs-operator.io,resources=leilfsclusters/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=daemonsets;statefulsets;deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services;persistentvolumeclaims;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch;delete

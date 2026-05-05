@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/henres/saunafs-operator/test/utils"
+	"github.com/henres/leilfs-operator/test/utils"
 )
 
 const namespace = "saunafs-operator-system"

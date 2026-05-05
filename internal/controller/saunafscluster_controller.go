@@ -38,8 +38,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
-	"github.com/henres/saunafs-operator/internal/metrics"
+	saunafsv1alpha1 "github.com/henres/leilfs-operator/api/v1alpha1"
+	"github.com/henres/leilfs-operator/internal/metrics"
 )
 
 // SaunaFSClusterReconciler reconciles a SaunaFSCluster object

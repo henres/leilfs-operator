@@ -34,9 +34,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
-	"github.com/henres/saunafs-operator/internal/controller"
-	"github.com/henres/saunafs-operator/internal/metrics"
+	saunafsv1alpha1 "github.com/henres/leilfs-operator/api/v1alpha1"
+	"github.com/henres/leilfs-operator/internal/controller"
+	"github.com/henres/leilfs-operator/internal/metrics"
 	//+kubebuilder:scaffold:imports
 )
 

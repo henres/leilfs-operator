@@ -29,7 +29,7 @@ package main
 import (
 	"os"
 
-	"github.com/henres/saunafs-operator/cmd/kubectl-saunafs/cmd"
+	"github.com/henres/leilfs-operator/cmd/kubectl-saunafs/cmd"
 )
 
 func main() {

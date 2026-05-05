@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	saunafsv1alpha1 "github.com/henres/saunafs-operator/api/v1alpha1"
+	saunafsv1alpha1 "github.com/henres/leilfs-operator/api/v1alpha1"
 )
 
 var _ = Describe("SaunaFSCluster Controller", func() {

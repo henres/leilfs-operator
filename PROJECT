@@ -6,7 +6,7 @@ domain: saunafs-operator.io
 layout:
 - go.kubebuilder.io/v4
 projectName: saunafs-operator
-repo: github.com/henres/saunafs-operator
+repo: github.com/henres/leilfs-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,6 @@ resources:
   domain: saunafs-operator.io
   group: saunafs
   kind: SaunaFSCluster
-  path: github.com/henres/saunafs-operator/api/v1alpha1
+  path: github.com/henres/leilfs-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

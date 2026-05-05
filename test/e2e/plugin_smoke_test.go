@@ -40,7 +40,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henres/saunafs-operator/test/utils"
+	"github.com/henres/leilfs-operator/test/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )

@@ -1,4 +1,4 @@
-module github.com/henres/saunafs-operator
+module github.com/henres/leilfs-operator
 
 go 1.21
 

@@ -44,8 +44,8 @@ enablement (NFS, WebUI, Expose), and the real installed version of each
 master and chunkserver pod (via kubectl exec).
 
 Examples:
-  kubectl saunafs status my-cluster
-  kubectl saunafs status my-cluster -n my-namespace`,
+  kubectl leilfs status my-cluster
+  kubectl leilfs status my-cluster -n my-namespace`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runStatus(opts, args[0])

@@ -37,8 +37,8 @@ Goals control how many copies (replication) or how many data/parity shards
 (erasure coding) are maintained for each stored file.
 
 Examples:
-  kubectl saunafs goals my-cluster
-  kubectl saunafs goals my-cluster -n my-namespace`,
+  kubectl leilfs goals my-cluster
+  kubectl leilfs goals my-cluster -n my-namespace`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runGoals(opts, args[0])

@@ -48,19 +48,19 @@ specific component, and --server to select a specific chunk server by name.
 
 Examples:
   # Logs from the master pod
-  kubectl saunafs logs my-cluster
+  kubectl leilfs logs my-cluster
 
   # Follow (tail -f) master logs
-  kubectl saunafs logs my-cluster --follow
+  kubectl leilfs logs my-cluster --follow
 
   # Last 100 lines from the master
-  kubectl saunafs logs my-cluster --tail 100
+  kubectl leilfs logs my-cluster --tail 100
 
   # Logs from the NFS gateway pod
-  kubectl saunafs logs my-cluster --component nfs
+  kubectl leilfs logs my-cluster --component nfs
 
   # Logs from a specific chunk server
-  kubectl saunafs logs my-cluster --component chunk --server cs-hdd001`,
+  kubectl leilfs logs my-cluster --component chunk --server cs-hdd001`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runLogs(opts, args[0], component, serverName, follow, tail, previous)

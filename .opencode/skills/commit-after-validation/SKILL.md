@@ -67,7 +67,7 @@ This repo uses **Conventional Commits**: `type(scope): short description`
 | `operator` | Reconcile loop, controller logic |
 | `rbac` | Roles, RoleBindings, ServiceAccounts |
 | `crd` | API types, printcolumns, status fields |
-| `plugin` | kubectl-saunafs plugin |
+| `plugin` | kubectl-leilfs plugin |
 | `metrics` | Prometheus metrics emitted by the operator |
 | `monitoring` | ServiceMonitor, Grafana dashboards, monitoring Makefile targets |
 | `ci` | GitHub Actions, Makefile |

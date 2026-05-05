@@ -72,10 +72,10 @@ A privileged client Pod is created to mount the filesystem via sfsmount and run
 
 Examples:
   # Show the goal of the root directory
-  kubectl saunafs filegoal get my-cluster /
+  kubectl leilfs filegoal get my-cluster /
 
   # Show goals recursively for a directory
-  kubectl saunafs filegoal get my-cluster /data -r`,
+  kubectl leilfs filegoal get my-cluster /data -r`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runFileGoalGet(opts, args[0], args[1], recursive, clientImage)
@@ -132,13 +132,13 @@ and may take minutes to hours depending on the amount of data.
 
 Examples:
   # Set goal ec_4_2 on a single file
-  kubectl saunafs filegoal set my-cluster ec_4_2 /myfile
+  kubectl leilfs filegoal set my-cluster ec_4_2 /myfile
 
   # Set goal recursively on a directory
-  kubectl saunafs filegoal set my-cluster ec_4_2 /data -r
+  kubectl leilfs filegoal set my-cluster ec_4_2 /data -r
 
   # Apply to the entire filesystem
-  kubectl saunafs filegoal set my-cluster ec_4_2 / -r`,
+  kubectl leilfs filegoal set my-cluster ec_4_2 / -r`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runFileGoalSet(opts, args[0], args[1], args[2], recursive, clientImage)
@@ -228,7 +228,7 @@ func runFUSEPod(
 			Name:      podName,
 			Namespace: ns,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "kubectl-saunafs",
+				"app.kubernetes.io/managed-by": "kubectl-leilfs",
 				"app.kubernetes.io/instance":   clusterName,
 			},
 		},

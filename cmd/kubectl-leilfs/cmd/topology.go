@@ -37,8 +37,8 @@ master DaemonSet node selector, and per-chunkserver node/disk assignments.
 Also shows the live pod status for each component.
 
 Examples:
-  kubectl saunafs topology my-cluster
-  kubectl saunafs topology my-cluster -n my-namespace`,
+  kubectl leilfs topology my-cluster
+  kubectl leilfs topology my-cluster -n my-namespace`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runTopology(opts, args[0])

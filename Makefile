@@ -70,18 +70,18 @@ test: manifests generate fmt vet envtest ## Run tests.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
-# PLUGIN_BIN     - path to the plugin binary (default: bin/kubectl-saunafs)
+# PLUGIN_BIN     - path to the plugin binary (default: bin/kubectl-leilfs)
 # PLUGIN_CLUSTER - LeilFSCluster name to test against (default: leilfscluster-sample)
 # PLUGIN_NS      - namespace (default: default)
 # Requires a running Kind cluster: make kind-reset
-PLUGIN_BIN     ?= bin/kubectl-saunafs
+PLUGIN_BIN     ?= bin/kubectl-leilfs
 PLUGIN_CLUSTER ?= leilfscluster-sample
 PLUGIN_NS      ?= default
 
 .PHONY: test-plugin
-test-plugin: build-plugin ## Run kubectl-saunafs plugin smoke tests against a live cluster.
+test-plugin: build-plugin ## Run kubectl-leilfs plugin smoke tests against a live cluster.
 	PLUGIN_BIN=$(PLUGIN_BIN) PLUGIN_CLUSTER=$(PLUGIN_CLUSTER) PLUGIN_NS=$(PLUGIN_NS) \
-	  go test ./test/e2e/ -v --ginkgo.v --ginkgo.focus "kubectl-saunafs" --ginkgo.timeout 10m
+	  go test ./test/e2e/ -v --ginkgo.v --ginkgo.focus "kubectl-leilfs" --ginkgo.timeout 10m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter & yamllint
@@ -98,14 +98,14 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: build-plugin
-build-plugin: fmt vet ## Build the kubectl-saunafs plugin binary.
-	go build -o bin/kubectl-saunafs ./cmd/kubectl-saunafs/
+build-plugin: fmt vet ## Build the kubectl-leilfs plugin binary.
+	go build -o bin/kubectl-leilfs ./cmd/kubectl-leilfs/
 
 .PHONY: install-plugin
-install-plugin: build-plugin ## Install the kubectl-saunafs plugin into GOBIN (or ~/go/bin).
-	cp bin/kubectl-saunafs $(GOBIN)/kubectl-saunafs
-	@echo "Plugin installed to $(GOBIN)/kubectl-saunafs"
-	@echo "Make sure $(GOBIN) is in your PATH, then use: kubectl saunafs --help"
+install-plugin: build-plugin ## Install the kubectl-leilfs plugin into GOBIN (or ~/go/bin).
+	cp bin/kubectl-leilfs $(GOBIN)/kubectl-leilfs
+	@echo "Plugin installed to $(GOBIN)/kubectl-leilfs"
+	@echo "Make sure $(GOBIN) is in your PATH, then use: kubectl leilfs --help"
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

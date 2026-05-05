@@ -36,35 +36,35 @@ func NewRootCmd() *cobra.Command {
 	opts := &rootOptions{}
 
 	root := &cobra.Command{
-		Use:   "kubectl-saunafs",
+		Use:   "kubectl-leilfs",
 		Short: "Manage LeilFS clusters deployed by the LeilFS operator",
-		Long: `kubectl-saunafs is a kubectl plugin that lets you inspect and operate
+		Long: `kubectl-leilfs is a kubectl plugin that lets you inspect and operate
 LeilFSCluster resources managed by the saunafs-operator.
 
 Examples:
   # List all LeilFSClusters in the current namespace
-  kubectl saunafs list
+  kubectl leilfs list
 
   # Show detailed status of a cluster
-  kubectl saunafs status my-cluster
+  kubectl leilfs status my-cluster
 
   # Show the master/chunkserver topology
-  kubectl saunafs topology my-cluster
+  kubectl leilfs topology my-cluster
 
   # Show the configured storage goals
-  kubectl saunafs goals my-cluster
+  kubectl leilfs goals my-cluster
 
   # Stream logs from the master pod
-  kubectl saunafs logs my-cluster
+  kubectl leilfs logs my-cluster
 
 	# Run a saunafs-admin command on the master pod
-  kubectl saunafs admin my-cluster -- info
+  kubectl leilfs admin my-cluster -- info
 
   # Show the goal of a path
-  kubectl saunafs filegoal get my-cluster /
+  kubectl leilfs filegoal get my-cluster /
 
   # Change the goal of a directory recursively
-  kubectl saunafs filegoal set my-cluster ec_4_2 /data -r`,
+  kubectl leilfs filegoal set my-cluster ec_4_2 /data -r`,
 		SilenceUsage: true,
 	}
 

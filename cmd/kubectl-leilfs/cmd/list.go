@@ -46,13 +46,13 @@ func newListCmd(opts *rootOptions) *cobra.Command {
 
 Examples:
   # List clusters in the current namespace
-  kubectl saunafs list
+  kubectl leilfs list
 
   # List clusters in a specific namespace
-  kubectl saunafs list -n my-namespace
+  kubectl leilfs list -n my-namespace
 
   # List clusters in all namespaces
-  kubectl saunafs list -A`,
+  kubectl leilfs list -A`,
 		RunE: func(c *cobra.Command, args []string) error {
 			return runList(opts, allNamespaces)
 		},

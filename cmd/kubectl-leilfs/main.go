@@ -14,22 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// kubectl-saunafs is a kubectl plugin to inspect and manage LeilFSCluster resources.
+// kubectl-leilfs is a kubectl plugin to inspect and manage LeilFSCluster resources.
 //
 // Usage:
 //
-//	kubectl saunafs list               List all LeilFSCluster resources
-//	kubectl saunafs status   <name>    Show the status of a LeilFSCluster
-//	kubectl saunafs topology <name>    Show master/chunkserver topology
-//	kubectl saunafs goals    <name>    List the configured storage goals
-//	kubectl saunafs logs     <name>    Stream logs from master or a chunkserver
-//	kubectl saunafs admin    <name>    Execute saunafs-admin commands on the master pod
+//	kubectl leilfs list               List all LeilFSCluster resources
+//	kubectl leilfs status   <name>    Show the status of a LeilFSCluster
+//	kubectl leilfs topology <name>    Show master/chunkserver topology
+//	kubectl leilfs goals    <name>    List the configured storage goals
+//	kubectl leilfs logs     <name>    Stream logs from master or a chunkserver
+//	kubectl leilfs admin    <name>    Execute saunafs-admin commands on the master pod
 package main
 
 import (
 	"os"
 
-	"github.com/henres/leilfs-operator/cmd/kubectl-saunafs/cmd"
+	"github.com/henres/leilfs-operator/cmd/kubectl-leilfs/cmd"
 )
 
 func main() {

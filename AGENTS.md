@@ -9,7 +9,7 @@ optional NFS-Ganesha gateway and CSI driver.
 ```
 api/v1alpha1/                 # CRD types (SaunaFSCluster, status, printcolumns)
 cmd/main.go                   # manager entrypoint
-cmd/kubectl-saunafs/          # kubectl plugin (filegoal, etc.)
+cmd/kubectl-leilfs/          # kubectl plugin (filegoal, etc.)
 internal/controller/          # reconciler (saunafscluster_controller.go ~2k LOC)
 internal/metrics/             # cluster-level Prometheus metrics
 config/crd/bases/             # generated CRD YAML (do not edit by hand)
@@ -42,7 +42,7 @@ operator does not import that project's API types.
 | `make build-installer` | Emit a single consolidated YAML (CRDs + deployment) into `dist/install.yaml`. |
 | `make monitoring-up` | Install kube-prometheus-stack + ServiceMonitor + dashboards in the current cluster. |
 | `make monitoring-dashboards` | Re-sync `hack/monitoring/dashboards/*.json` into the Grafana ConfigMap. |
-| `make test-plugin` | Smoke tests for `kubectl-saunafs` against a live cluster. |
+| `make test-plugin` | Smoke tests for `kubectl-leilfs` against a live cluster. |
 
 ## Generated code rule
 

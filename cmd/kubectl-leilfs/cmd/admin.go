@@ -51,22 +51,22 @@ LeilFSCluster spec (saunafs-admin uses the client port, 9421 by default).
 
 Examples:
   # Show cluster information
-  kubectl saunafs admin my-cluster -- info
+  kubectl leilfs admin my-cluster -- info
 
   # List registered chunk servers
-  kubectl saunafs admin my-cluster -- list-chunkservers
+  kubectl leilfs admin my-cluster -- list-chunkservers
 
   # List chunk server disks (verbose)
-  kubectl saunafs admin my-cluster -- list-disks --verbose
+  kubectl leilfs admin my-cluster -- list-disks --verbose
 
   # Show storage goals usage
-  kubectl saunafs admin my-cluster -- list-goals --pretty
+  kubectl leilfs admin my-cluster -- list-goals --pretty
 
   # Show metadata server status
-  kubectl saunafs admin my-cluster -- metadataserver-status
+  kubectl leilfs admin my-cluster -- metadataserver-status
 
   # Check chunks health
-  kubectl saunafs admin my-cluster -- chunks-health --availability
+  kubectl leilfs admin my-cluster -- chunks-health --availability
 
 The subcommand and its options come after '--'; host and port are injected
 automatically from the LeilFSCluster spec.`,
@@ -84,7 +84,7 @@ automatically from the LeilFSCluster spec.`,
 
 func runAdmin(opts *rootOptions, args []string, clientImageOverride string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: kubectl saunafs admin <cluster-name> -- <saunafs-admin-args>")
+		return fmt.Errorf("usage: kubectl leilfs admin <cluster-name> -- <saunafs-admin-args>")
 	}
 	clusterName := args[0]
 	adminArgs := args[1:]
@@ -175,7 +175,7 @@ func runEphemeralPod(
 			Name:      podName,
 			Namespace: ns,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "kubectl-saunafs",
+				"app.kubernetes.io/managed-by": "kubectl-leilfs",
 				"app.kubernetes.io/instance":   clusterName,
 			},
 		},

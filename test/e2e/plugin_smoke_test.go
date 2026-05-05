@@ -16,7 +16,7 @@ limitations under the License.
 
 package e2e
 
-// Smoke tests for the kubectl-saunafs plugin.
+// Smoke tests for the kubectl-leilfs plugin.
 //
 // The tests require a running Kind cluster with a LeilFSCluster deployed.
 // Start (or reset) the cluster with:
@@ -29,7 +29,7 @@ package e2e
 //
 // Optional env overrides:
 //
-//	PLUGIN_BIN      path to the plugin binary   (default: bin/kubectl-saunafs)
+//	PLUGIN_BIN      path to the plugin binary   (default: bin/kubectl-leilfs)
 //	PLUGIN_CLUSTER  LeilFSCluster name          (default: leilfscluster-sample)
 //	PLUGIN_NS       namespace                    (default: default)
 
@@ -51,7 +51,7 @@ import (
 func pluginEnv() (bin, cluster, ns string) {
 	bin = os.Getenv("PLUGIN_BIN")
 	if bin == "" {
-		bin = "bin/kubectl-saunafs"
+		bin = "bin/kubectl-leilfs"
 	}
 	// Resolve relative paths against the project root (two directories up
 	// from test/e2e/).
@@ -80,7 +80,7 @@ func runPlugin(bin string, args ...string) (string, error) {
 	return string(out), err
 }
 
-var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
+var _ = Describe("kubectl-leilfs plugin", Ordered, func() {
 	var bin, cluster, ns string
 
 	BeforeAll(func() {
@@ -98,14 +98,14 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	Describe("list", func() {
 		It("lists LeilFSClusters and includes the sample cluster", func() {
 			out, err := runPlugin(bin, "-n", ns, "list")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs list failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs list failed:\n%s", out)
 			Expect(out).To(ContainSubstring(cluster),
 				"expected cluster %q in 'list' output", cluster)
 		})
 
 		It("lists all namespaces with -A", func() {
 			out, err := runPlugin(bin, "list", "-A")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs list -A failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs list -A failed:\n%s", out)
 			Expect(out).To(ContainSubstring(cluster))
 		})
 
@@ -122,7 +122,7 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	Describe("status", func() {
 		It("prints cluster status without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "status", cluster)
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs status failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs status failed:\n%s", out)
 			Expect(out).NotTo(BeEmpty())
 		})
 
@@ -151,7 +151,7 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	Describe("topology", func() {
 		It("prints topology without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "topology", cluster)
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs topology failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs topology failed:\n%s", out)
 			Expect(out).NotTo(BeEmpty())
 		})
 
@@ -174,7 +174,7 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	Describe("goals", func() {
 		It("prints goals without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "goals", cluster)
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs goals failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs goals failed:\n%s", out)
 			Expect(out).NotTo(BeEmpty())
 		})
 
@@ -198,13 +198,13 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	Describe("logs", func() {
 		It("fetches master logs without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "logs", cluster)
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs logs failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs logs failed:\n%s", out)
 			Expect(out).NotTo(BeEmpty())
 		})
 
 		It("fetches last 5 lines from master with --tail", func() {
 			out, err := runPlugin(bin, "-n", ns, "logs", cluster, "--tail", "5")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs logs --tail failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs logs --tail failed:\n%s", out)
 			lines := strings.Split(strings.TrimSpace(out), "\n")
 			Expect(len(lines)).To(BeNumerically("<=", 5+1), // +1 for header line printed to stderr
 				"expected at most 5 log lines, got %d", len(lines))
@@ -212,12 +212,12 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 
 		It("fetches nfs component logs without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "logs", cluster, "--component", "nfs", "--tail", "10")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs logs --component nfs failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs logs --component nfs failed:\n%s", out)
 		})
 
 		It("fetches interface component logs without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "logs", cluster, "--component", "interface", "--tail", "10")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs logs --component interface failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs logs --component interface failed:\n%s", out)
 		})
 
 		It("fetches a specific chunk server log with --component chunk --server", func() {
@@ -225,7 +225,7 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 				"--component", "chunk",
 				"--server", "worker1-hdd001",
 				"--tail", "10")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs logs --component chunk failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs logs --component chunk failed:\n%s", out)
 		})
 
 		It("returns an error for unknown component", func() {
@@ -243,33 +243,33 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 
 		It("runs saunafs-admin info and returns cluster statistics", func() {
 			out, err := runPlugin(bin, "-n", ns, "admin", cluster, "--", "info")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs admin info failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs admin info failed:\n%s", out)
 			Expect(out).To(ContainSubstring("Total space"))
 			Expect(out).To(ContainSubstring("Available space"))
 		})
 
 		It("runs list-chunkservers and shows connected chunk servers", func() {
 			out, err := runPlugin(bin, "-n", ns, "admin", cluster, "--", "list-chunkservers")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs admin list-chunkservers failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs admin list-chunkservers failed:\n%s", out)
 			// Expect at least one chunkserver entry (IP address pattern)
 			Expect(out).To(MatchRegexp(`\d+\.\d+\.\d+\.\d+`))
 		})
 
 		It("runs ready-chunkservers-count and returns a number", func() {
 			out, err := runPlugin(bin, "-n", ns, "admin", cluster, "--", "ready-chunkservers-count")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs admin ready-chunkservers-count failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs admin ready-chunkservers-count failed:\n%s", out)
 			Expect(out).To(MatchRegexp(`\d+`))
 		})
 
 		It("runs list-goals and shows the custom goal", func() {
 			out, err := runPlugin(bin, "-n", ns, "admin", cluster, "--", "list-goals", "--pretty")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs admin list-goals failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs admin list-goals failed:\n%s", out)
 			Expect(out).To(ContainSubstring("ec_4_2"))
 		})
 
 		It("runs metadataserver-status and returns personality", func() {
 			out, err := runPlugin(bin, "-n", ns, "admin", cluster, "--", "metadataserver-status")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs admin metadataserver-status failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs admin metadataserver-status failed:\n%s", out)
 			Expect(out).To(MatchRegexp(`(?i)master|shadow|personality`))
 		})
 	})
@@ -283,20 +283,20 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 
 		It("gets the goal of the root directory without error", func() {
 			out, err := runPlugin(bin, "-n", ns, "filegoal", "get", cluster, "/")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal get / failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs filegoal get / failed:\n%s", out)
 			// output format: "/mnt/saunafs: <goal-name>"
 			Expect(out).To(MatchRegexp(`/mnt/saunafs:\s+\S+`))
 		})
 
 		It("sets the goal of the root directory to ec_4_2", func() {
 			out, err := runPlugin(bin, "-n", ns, "filegoal", "set", cluster, "ec_4_2", "/")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal set ec_4_2 / failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs filegoal set ec_4_2 / failed:\n%s", out)
 			Expect(out).To(MatchRegexp(`/mnt/saunafs`))
 		})
 
 		It("gets the goal again and shows ec_4_2", func() {
 			out, err := runPlugin(bin, "-n", ns, "filegoal", "get", cluster, "/")
-			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs filegoal get / failed:\n%s", out)
+			Expect(err).NotTo(HaveOccurred(), "kubectl-leilfs filegoal get / failed:\n%s", out)
 			Expect(out).To(ContainSubstring("ec_4_2"))
 		})
 

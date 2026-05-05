@@ -94,6 +94,36 @@ Grafana dashboards in `hack/monitoring/dashboards/` are deployed via
 `make monitoring-dashboards` into a ConfigMap labelled
 `grafana_dashboard=1` (sidecar pickup).
 
+The metrics currently exposed (`leilfs_cluster_*`) are
+**Kubernetes-level only**: pod counts per role, HA state (active
+master, shadow lag), reconcile timings and errors. They describe how
+the operator manages the cluster, not the filesystem itself.
+
+### Backlog: filesystem-level metrics exporter
+
+The rich filesystem statistics shown in the upstream CGI UI
+(`/etc/cgi`, port 9425) — total/used chunks, endangered/missing
+chunks, replication queue depth, per-chunkserver used/total bytes,
+master metadata version, op/s, goal status — are **not** scraped into
+Prometheus today.
+
+Planned approach:
+
+- Build a small Prometheus exporter that talks to `sfsmaster` over
+  its admin port (9419) using the upstream protocol. Reuse
+  `saunafs-admin` JSON output where possible to avoid re-implementing
+  the binary protocol.
+- Re-publish the values as `leilfs_fs_*` metrics with stable labels
+  (`cluster`, `chunkserver`, `goal`, …).
+- Deploy either as a sidecar on the active master Pod (so failover
+  follows the master Lease holder automatically) or as a standalone
+  Deployment that targets the master `Service`. Sidecar is simpler
+  for observability of the active master, standalone is simpler for
+  RBAC and lifecycle.
+- Ship a Grafana dashboard mirroring the CGI UI views (cluster
+  health, chunk distribution, per-chunkserver breakdown, goal
+  status), alongside the existing `leilfs-operator-overview.json`.
+
 ## Skills
 
 This repo ships OpenCode skills under `.opencode/skills/`:

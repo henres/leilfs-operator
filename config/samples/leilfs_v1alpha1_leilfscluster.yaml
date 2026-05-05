@@ -1,5 +1,5 @@
 apiVersion: saunafs.saunafs-operator.io/v1alpha1
-kind: SaunaFSCluster
+kind: LeilFSCluster
 metadata:
   labels:
     app.kubernetes.io/name: saunafscluster

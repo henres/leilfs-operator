@@ -18,7 +18,7 @@ package e2e
 
 // Smoke tests for the kubectl-saunafs plugin.
 //
-// The tests require a running Kind cluster with a SaunaFSCluster deployed.
+// The tests require a running Kind cluster with a LeilFSCluster deployed.
 // Start (or reset) the cluster with:
 //
 //	make kind-reset
@@ -30,7 +30,7 @@ package e2e
 // Optional env overrides:
 //
 //	PLUGIN_BIN      path to the plugin binary   (default: bin/kubectl-saunafs)
-//	PLUGIN_CLUSTER  SaunaFSCluster name          (default: saunafscluster-sample)
+//	PLUGIN_CLUSTER  LeilFSCluster name          (default: saunafscluster-sample)
 //	PLUGIN_NS       namespace                    (default: default)
 
 import (
@@ -96,7 +96,7 @@ var _ = Describe("kubectl-saunafs plugin", Ordered, func() {
 	// list
 	// -------------------------------------------------------------------------
 	Describe("list", func() {
-		It("lists SaunaFSClusters and includes the sample cluster", func() {
+		It("lists LeilFSClusters and includes the sample cluster", func() {
 			out, err := runPlugin(bin, "-n", ns, "list")
 			Expect(err).NotTo(HaveOccurred(), "kubectl-saunafs list failed:\n%s", out)
 			Expect(out).To(ContainSubstring(cluster),

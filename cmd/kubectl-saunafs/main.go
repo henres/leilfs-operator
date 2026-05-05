@@ -14,12 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// kubectl-saunafs is a kubectl plugin to inspect and manage SaunaFSCluster resources.
+// kubectl-saunafs is a kubectl plugin to inspect and manage LeilFSCluster resources.
 //
 // Usage:
 //
-//	kubectl saunafs list               List all SaunaFSCluster resources
-//	kubectl saunafs status   <name>    Show the status of a SaunaFSCluster
+//	kubectl saunafs list               List all LeilFSCluster resources
+//	kubectl saunafs status   <name>    Show the status of a LeilFSCluster
 //	kubectl saunafs topology <name>    Show master/chunkserver topology
 //	kubectl saunafs goals    <name>    List the configured storage goals
 //	kubectl saunafs logs     <name>    Stream logs from master or a chunkserver

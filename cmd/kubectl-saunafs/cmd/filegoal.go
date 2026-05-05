@@ -30,20 +30,20 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// mountPoint is where the SaunaFS root is mounted inside the ephemeral pod.
+// mountPoint is where the LeilFS root is mounted inside the ephemeral pod.
 const mountPoint = "/mnt/saunafs"
 
 func newFileGoalCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "filegoal <cluster-name>",
 		Short: "Get or set the storage goal of a file or directory",
-		Long: `Get or set the SaunaFS storage goal on a file or directory inside the cluster.
+		Long: `Get or set the LeilFS storage goal on a file or directory inside the cluster.
 
-saunafs getgoal / setgoal operate on paths inside a mounted SaunaFS filesystem.
+saunafs getgoal / setgoal operate on paths inside a mounted LeilFS filesystem.
 This command mounts the filesystem via sfsmount inside a short-lived privileged
 Pod, runs the tool, then unmounts and removes the pod.
 
-The <path> argument is relative to the root of the SaunaFS filesystem
+The <path> argument is relative to the root of the LeilFS filesystem
 (e.g. / or /mydir/myfile).`,
 	}
 
@@ -64,9 +64,9 @@ func newFileGoalGetCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <cluster-name> <path>",
 		Short: "Show the storage goal of a file or directory",
-		Long: `Display the current SaunaFS storage goal for a path inside the filesystem.
+		Long: `Display the current LeilFS storage goal for a path inside the filesystem.
 
-The path is relative to the SaunaFS root (e.g. / or /mydir/myfile).
+The path is relative to the LeilFS root (e.g. / or /mydir/myfile).
 A privileged client Pod is created to mount the filesystem via sfsmount and run
 'saunafs getgoal', then deleted.
 
@@ -106,7 +106,7 @@ func runFileGoalGet(opts *rootOptions, clusterName, path string, recursive bool,
 	script := buildMountScript(masterSvcName, getgoalCmd)
 
 	fmt.Fprintf(os.Stderr, "Using client image: %s\n", clientImage)
-	fmt.Fprintf(os.Stderr, "Mounting SaunaFS from %s, then: saunafs getgoal %s\n\n", masterSvcName, path)
+	fmt.Fprintf(os.Stderr, "Mounting LeilFS from %s, then: saunafs getgoal %s\n\n", masterSvcName, path)
 
 	return runFUSEPod(context.Background(), k8s, ns, clusterName, clientImage, script)
 }
@@ -120,10 +120,10 @@ func newFileGoalSetCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <cluster-name> <goal> <path>",
 		Short: "Change the storage goal of a file or directory",
-		Long: `Set the SaunaFS storage goal for a path inside the filesystem.
+		Long: `Set the LeilFS storage goal for a path inside the filesystem.
 
 The goal can be a name (e.g. ec_4_2) or a numeric ID (e.g. 10).
-The path is relative to the SaunaFS root (e.g. / or /mydir).
+The path is relative to the LeilFS root (e.g. / or /mydir).
 A privileged client Pod is created to mount the filesystem via sfsmount and run
 'saunafs setgoal', then deleted.
 
@@ -169,7 +169,7 @@ func runFileGoalSet(opts *rootOptions, clusterName, goal, path string, recursive
 	script := buildMountScript(masterSvcName, setgoalCmd)
 
 	fmt.Fprintf(os.Stderr, "Using client image: %s\n", clientImage)
-	fmt.Fprintf(os.Stderr, "Mounting SaunaFS from %s, then: saunafs setgoal %s %s\n\n", masterSvcName, goal, path)
+	fmt.Fprintf(os.Stderr, "Mounting LeilFS from %s, then: saunafs setgoal %s %s\n\n", masterSvcName, goal, path)
 
 	return runFUSEPod(context.Background(), k8s, ns, clusterName, clientImage, script)
 }
@@ -194,7 +194,7 @@ func normalizePath(p string) string {
 
 // buildMountScript returns a shell script that:
 //  1. Creates the mountpoint directory
-//  2. Mounts the SaunaFS root via sfsmount
+//  2. Mounts the LeilFS root via sfsmount
 //  3. Runs the given command
 //  4. Unmounts (best effort)
 func buildMountScript(masterSvcName, command string) string {
@@ -301,7 +301,7 @@ func prepareFileGoalRun(opts *rootOptions, clusterName, clientImageOverride stri
 	ctx := context.Background()
 	clusterObj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, clusterName, metav1.GetOptions{})
 	if err != nil {
-		return nil, "", "", "", fmt.Errorf("SaunaFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
+		return nil, "", "", "", fmt.Errorf("LeilFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
 	}
 
 	clientImage = clientImageOverride

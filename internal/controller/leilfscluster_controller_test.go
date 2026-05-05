@@ -30,7 +30,7 @@ import (
 	saunafsv1alpha1 "github.com/henres/leilfs-operator/api/v1alpha1"
 )
 
-var _ = Describe("SaunaFSCluster Controller", func() {
+var _ = Describe("LeilFSCluster Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -40,18 +40,18 @@ var _ = Describe("SaunaFSCluster Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		saunafscluster := &saunafsv1alpha1.SaunaFSCluster{}
+		saunafscluster := &saunafsv1alpha1.LeilFSCluster{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind SaunaFSCluster")
+			By("creating the custom resource for the Kind LeilFSCluster")
 			err := k8sClient.Get(ctx, typeNamespacedName, saunafscluster)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &saunafsv1alpha1.SaunaFSCluster{
+				resource := &saunafsv1alpha1.LeilFSCluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: saunafsv1alpha1.SaunaFSClusterSpec{
+					Spec: saunafsv1alpha1.LeilFSClusterSpec{
 						Chunk: saunafsv1alpha1.ChunkSpec{
 							Servers: []saunafsv1alpha1.ChunkServerSpec{
 								{
@@ -68,16 +68,16 @@ var _ = Describe("SaunaFSCluster Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &saunafsv1alpha1.SaunaFSCluster{}
+			resource := &saunafsv1alpha1.LeilFSCluster{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance SaunaFSCluster")
+			By("Cleanup the specific resource instance LeilFSCluster")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &SaunaFSClusterReconciler{
+			controllerReconciler := &LeilFSClusterReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

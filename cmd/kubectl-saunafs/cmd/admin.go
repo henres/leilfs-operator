@@ -37,7 +37,7 @@ func newAdminCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "admin <cluster-name> -- <saunafs-admin-args...>",
 		Short: "Execute saunafs-admin commands against the master",
-		Long: `Run a saunafs-admin command against a SaunaFSCluster master.
+		Long: `Run a saunafs-admin command against a LeilFSCluster master.
 
 Because saunafs-admin is part of the saunafs-client package (not installed in
 the master image), this command spins up a short-lived Pod using the client
@@ -47,7 +47,7 @@ The client image is read from spec.csi.image (usually saunafs-client:latest).
 Override it with --client-image if needed.
 
 The master service hostname and port are resolved automatically from the
-SaunaFSCluster spec (saunafs-admin uses the client port, 9421 by default).
+LeilFSCluster spec (saunafs-admin uses the client port, 9421 by default).
 
 Examples:
   # Show cluster information
@@ -69,7 +69,7 @@ Examples:
   kubectl saunafs admin my-cluster -- chunks-health --availability
 
 The subcommand and its options come after '--'; host and port are injected
-automatically from the SaunaFSCluster spec.`,
+automatically from the LeilFSCluster spec.`,
 		DisableFlagParsing: false,
 		RunE: func(c *cobra.Command, args []string) error {
 			return runAdmin(opts, args, clientImage)
@@ -114,7 +114,7 @@ func runAdmin(opts *rootOptions, args []string, clientImageOverride string) erro
 	// Verify the cluster exists and read its spec.
 	clusterObj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, clusterName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("SaunaFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
+		return fmt.Errorf("LeilFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
 	}
 
 	// Determine the client image to use.

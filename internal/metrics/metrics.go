@@ -1,7 +1,7 @@
 // Package metrics defines Prometheus collectors exposed by the
 // saunafs-operator controller-manager. These metrics complement the
 // default controller-runtime metrics with cluster-level observability
-// derived from the SaunaFSCluster resources reconciled by this operator.
+// derived from the LeilFSCluster resources reconciled by this operator.
 package metrics
 
 import (
@@ -25,7 +25,7 @@ var (
 	ClusterInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "saunafs_cluster_info",
-			Help: "Constant 1 gauge per SaunaFSCluster, with version information as labels.",
+			Help: "Constant 1 gauge per LeilFSCluster, with version information as labels.",
 		},
 		[]string{"namespace", "cluster", "version"},
 	)
@@ -33,7 +33,7 @@ var (
 	ClusterPhase = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "saunafs_cluster_phase",
-			Help: "Current phase of the SaunaFSCluster (1 for the active phase, 0 otherwise).",
+			Help: "Current phase of the LeilFSCluster (1 for the active phase, 0 otherwise).",
 		},
 		[]string{"namespace", "cluster", "phase"},
 	)

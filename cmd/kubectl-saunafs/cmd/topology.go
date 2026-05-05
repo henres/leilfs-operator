@@ -31,8 +31,8 @@ import (
 func newTopologyCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "topology <cluster-name>",
-		Short: "Show the master/chunkserver topology of a SaunaFSCluster",
-		Long: `Display the node placement of each component in a SaunaFSCluster:
+		Short: "Show the master/chunkserver topology of a LeilFSCluster",
+		Long: `Display the node placement of each component in a LeilFSCluster:
 master DaemonSet node selector, and per-chunkserver node/disk assignments.
 Also shows the live pod status for each component.
 
@@ -71,11 +71,11 @@ func runTopology(opts *rootOptions, name string) error {
 
 	obj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("getting SaunaFSCluster %q in namespace %q: %w", name, ns, err)
+		return fmt.Errorf("getting LeilFSCluster %q in namespace %q: %w", name, ns, err)
 	}
 	data := obj.Object
 
-	fmt.Printf("Topology for SaunaFSCluster %q (namespace: %s)\n\n", name, ns)
+	fmt.Printf("Topology for LeilFSCluster %q (namespace: %s)\n\n", name, ns)
 
 	// --- Master ---
 	fmt.Println("Master:")

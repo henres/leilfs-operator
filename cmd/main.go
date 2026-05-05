@@ -128,11 +128,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.SaunaFSClusterReconciler{
+	if err = (&controller.LeilFSClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SaunaFSCluster")
+		setupLog.Error(err, "unable to create controller", "controller", "LeilFSCluster")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

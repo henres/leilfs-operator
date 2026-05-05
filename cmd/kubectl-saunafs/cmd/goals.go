@@ -30,8 +30,8 @@ import (
 func newGoalsCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "goals <cluster-name>",
-		Short: "List the storage goals configured for a SaunaFSCluster",
-		Long: `Display the list of SaunaFS storage goals defined in a SaunaFSCluster's spec.
+		Short: "List the storage goals configured for a LeilFSCluster",
+		Long: `Display the list of LeilFS storage goals defined in a LeilFSCluster's spec.
 
 Goals control how many copies (replication) or how many data/parity shards
 (erasure coding) are maintained for each stored file.
@@ -65,18 +65,18 @@ func runGoals(opts *rootOptions, name string) error {
 	ctx := context.Background()
 	obj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("getting SaunaFSCluster %q in namespace %q: %w", name, ns, err)
+		return fmt.Errorf("getting LeilFSCluster %q in namespace %q: %w", name, ns, err)
 	}
 	data := obj.Object
 
 	goals := extractSlice(data, "spec", "goals")
 	if len(goals) == 0 {
-		fmt.Printf("No custom goals defined for SaunaFSCluster %q.\n", name)
-		fmt.Println("SaunaFS will use its built-in defaults (goals 1–9).")
+		fmt.Printf("No custom goals defined for LeilFSCluster %q.\n", name)
+		fmt.Println("LeilFS will use its built-in defaults (goals 1–9).")
 		return nil
 	}
 
-	fmt.Printf("Storage goals for SaunaFSCluster %q (namespace: %s)\n\n", name, ns)
+	fmt.Printf("Storage goals for LeilFSCluster %q (namespace: %s)\n\n", name, ns)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tTYPE\tCONFIG\tDEFAULT")

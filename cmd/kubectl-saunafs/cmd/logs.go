@@ -40,8 +40,8 @@ func newLogsCmd(opts *rootOptions) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "logs <cluster-name>",
-		Short: "Stream logs from a SaunaFSCluster component",
-		Long: `Fetch or stream logs from a pod belonging to a SaunaFSCluster component.
+		Short: "Stream logs from a LeilFSCluster component",
+		Long: `Fetch or stream logs from a pod belonging to a LeilFSCluster component.
 
 By default, logs from the master pod are shown. Use --component to target a
 specific component, and --server to select a specific chunk server by name.
@@ -107,7 +107,7 @@ func runLogs(opts *rootOptions, clusterName, component, serverName string, follo
 	// Verify the cluster exists.
 	clusterObj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, clusterName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("SaunaFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
+		return fmt.Errorf("LeilFSCluster %q not found in namespace %q: %w", clusterName, ns, err)
 	}
 	_ = clusterObj
 

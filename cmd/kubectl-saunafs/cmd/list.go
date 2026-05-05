@@ -41,8 +41,8 @@ func newListCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls", "get"},
-		Short:   "List SaunaFSCluster resources",
-		Long: `List all SaunaFSCluster resources in the current or specified namespace.
+		Short:   "List LeilFSCluster resources",
+		Long: `List all LeilFSCluster resources in the current or specified namespace.
 
 Examples:
   # List clusters in the current namespace
@@ -86,14 +86,14 @@ func runList(opts *rootOptions, allNamespaces bool) error {
 	ctx := context.Background()
 	rawList, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("listing SaunaFSClusters: %w", err)
+		return fmt.Errorf("listing LeilFSClusters: %w", err)
 	}
 
 	if len(rawList.Items) == 0 {
 		if allNamespaces {
-			fmt.Println("No SaunaFSCluster resources found.")
+			fmt.Println("No LeilFSCluster resources found.")
 		} else {
-			fmt.Printf("No SaunaFSCluster resources found in namespace %q.\n", ns)
+			fmt.Printf("No LeilFSCluster resources found in namespace %q.\n", ns)
 		}
 		return nil
 	}

@@ -37,12 +37,12 @@ func NewRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "kubectl-saunafs",
-		Short: "Manage SaunaFS clusters deployed by the SaunaFS operator",
+		Short: "Manage LeilFS clusters deployed by the LeilFS operator",
 		Long: `kubectl-saunafs is a kubectl plugin that lets you inspect and operate
-SaunaFSCluster resources managed by the saunafs-operator.
+LeilFSCluster resources managed by the saunafs-operator.
 
 Examples:
-  # List all SaunaFSClusters in the current namespace
+  # List all LeilFSClusters in the current namespace
   kubectl saunafs list
 
   # Show detailed status of a cluster

@@ -36,8 +36,8 @@ import (
 func newStatusCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <cluster-name>",
-		Short: "Show the status of a SaunaFSCluster",
-		Long: `Show detailed status information for a SaunaFSCluster resource.
+		Short: "Show the status of a LeilFSCluster",
+		Long: `Show detailed status information for a LeilFSCluster resource.
 
 Displays conditions, chunk server counts, master configuration, component
 enablement (NFS, WebUI, Expose), and the real installed version of each
@@ -77,7 +77,7 @@ func runStatus(opts *rootOptions, name string) error {
 	ctx := context.Background()
 	obj, err := dynClient.Resource(saunafsClusterGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("getting SaunaFSCluster %q in namespace %q: %w", name, ns, err)
+		return fmt.Errorf("getting LeilFSCluster %q in namespace %q: %w", name, ns, err)
 	}
 
 	data := obj.Object

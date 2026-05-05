@@ -23,8 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// SaunaFSClusterSpec defines the desired state of SaunaFSCluster
-type SaunaFSClusterSpec struct {
+// LeilFSClusterSpec defines the desired state of LeilFSCluster
+type LeilFSClusterSpec struct {
 	// Master configures the master daemonset.
 	Master MasterSpec `json:"master,omitempty"`
 	// Shadow configures optional shadow master instances. Shadow masters run
@@ -43,7 +43,7 @@ type SaunaFSClusterSpec struct {
 	Metalogger *MetaloggerSpec `json:"metalogger,omitempty"`
 	// Goals defines custom storage goals written to sfsgoals.cfg on the master.
 	// Each entry produces one line in the file; the master reads it at startup.
-	// If omitted, SaunaFS uses its built-in defaults (goals 1–9).
+	// If omitted, LeilFS uses its built-in defaults (goals 1–9).
 	// Goals with IDs 1–9 override the built-in ones; IDs 10–20 are purely
 	// custom. The first entry flagged with Default=true is applied as the
 	// cluster-wide default goal via the master configuration.
@@ -52,16 +52,16 @@ type SaunaFSClusterSpec struct {
 	CSI CSISpec `json:"csi,omitempty"`
 	// WebUI controls the optional CGI web interface (saunafs-cgiserver).
 	WebUI WebUISpec `json:"interface,omitempty"`
-	// Expose controls optional NodePort exposure so that external SaunaFS
+	// Expose controls optional NodePort exposure so that external LeilFS
 	// clients (saunafs-client) can mount the filesystem from outside the cluster.
 	Expose ExposeSpec `json:"expose,omitempty"`
-	// NFS controls an optional NFS-Ganesha gateway that re-exports the SaunaFS
+	// NFS controls an optional NFS-Ganesha gateway that re-exports the LeilFS
 	// filesystem over standard NFS (port 2049). Any NFS client can then mount
 	// the filesystem without installing saunafs-client.
 	NFS NFSSpec `json:"nfs,omitempty"`
 }
 
-// Condition type constants for SaunaFSCluster.
+// Condition type constants for LeilFSCluster.
 const (
 	// ConditionReady indicates that all cluster components have been
 	// successfully reconciled and are expected to be running.
@@ -75,8 +75,8 @@ const (
 	ReasonReady = "Ready"
 )
 
-// SaunaFSClusterStatus defines the observed state of SaunaFSCluster.
-type SaunaFSClusterStatus struct {
+// LeilFSClusterStatus defines the observed state of LeilFSCluster.
+type LeilFSClusterStatus struct {
 	// Conditions holds the latest observed conditions of the cluster.
 	// The "Ready" condition indicates whether all components have been
 	// successfully reconciled.
@@ -102,10 +102,10 @@ type SaunaFSClusterStatus struct {
 	ReadyShadows int32 `json:"readyShadows,omitempty"`
 }
 
-// GoalSpec defines one SaunaFS storage goal written to sfsgoals.cfg.
+// GoalSpec defines one LeilFS storage goal written to sfsgoals.cfg.
 // Exactly one of Replication or EC must be set.
 //
-// Built-in SaunaFS goals use IDs 1–9; custom goals should use 10–20.
+// Built-in LeilFS goals use IDs 1–9; custom goals should use 10–20.
 //
 // Examples:
 //
@@ -114,7 +114,7 @@ type SaunaFSClusterStatus struct {
 //	{ id: 11, name: "node_spread", replication: 3, nodeLabels: ["node1", "node2", "node3"] }
 type GoalSpec struct {
 	// ID is the numeric identifier for this goal (1–20).
-	// SaunaFS built-in goals occupy IDs 1–9.
+	// LeilFS built-in goals occupy IDs 1–9.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=20
 	ID int32 `json:"id"`
@@ -165,7 +165,7 @@ type ECSpec struct {
 }
 
 // MasterStorageSpec configures the PersistentVolumeClaim used to persist
-// the SaunaFS master metadata directory (/var/lib/saunafs).
+// the LeilFS master metadata directory (/var/lib/saunafs).
 // If omitted, the operator creates a 1Gi PVC using the cluster's default
 // StorageClass (typically "standard" in Kind / local-path-provisioner).
 type MasterStorageSpec struct {
@@ -286,7 +286,7 @@ type ChunkServerSpec struct {
 	// NodeName directly schedules this chunk server onto a named node.
 	NodeName string `json:"nodeName"`
 	// Label is the LABEL value written into sfschunkserver.cfg.
-	// It is used by SaunaFS storage goals to pin chunks to specific servers
+	// It is used by LeilFS storage goals to pin chunks to specific servers
 	// (e.g. one label per physical node ensures node-level data spreading).
 	// When empty, no LABEL line is written and the chunkserver is anonymous.
 	Label string `json:"label,omitempty"`
@@ -345,7 +345,7 @@ type NFSSpec struct {
 	// Enabled controls whether the NFS-Ganesha Deployment and Service are created.
 	Enabled *bool `json:"enabled,omitempty"`
 	// Image is the NFS-Ganesha container image to use.
-	// Must include the SaunaFS FSAL (saunafs-nfs-ganesha package).
+	// Must include the LeilFS FSAL (saunafs-nfs-ganesha package).
 	Image string `json:"image,omitempty"`
 	// Replicas is the number of NFS gateway pods (default 1).
 	Replicas *int32 `json:"replicas,omitempty"`
@@ -357,7 +357,7 @@ type NFSSpec struct {
 	// ServiceType controls how the NFS Service is exposed.
 	// Defaults to NodePort.
 	ServiceType corev1.ServiceType `json:"serviceType,omitempty"`
-	// ExportPath is the SaunaFS path to export (default "/").
+	// ExportPath is the LeilFS path to export (default "/").
 	ExportPath string `json:"exportPath,omitempty"`
 	// Squash controls NFS root squashing (default "No_Root_Squash").
 	Squash string `json:"squash,omitempty"`
@@ -369,12 +369,12 @@ type NFSSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// ExposeSpec controls optional NodePort exposure for external SaunaFS clients.
+// ExposeSpec controls optional NodePort exposure for external LeilFS clients.
 type ExposeSpec struct {
 	// Enabled controls whether a NodePort Service is created so that external
-	// SaunaFS clients can connect to the master and mount the filesystem.
+	// LeilFS clients can connect to the master and mount the filesystem.
 	Enabled *bool `json:"enabled,omitempty"`
-	// ClientNodePort is the NodePort assigned to the SaunaFS client port (9421).
+	// ClientNodePort is the NodePort assigned to the LeilFS client port (9421).
 	// When 0 (the default) Kubernetes assigns a random port in the NodePort range.
 	// +kubebuilder:validation:Minimum=30000
 	// +kubebuilder:validation:Maximum=32767
@@ -400,24 +400,24 @@ type NamedPort struct {
 //+kubebuilder:printcolumn:name="ChunkServers",type="integer",JSONPath=".status.readyChunkServers",description="Ready chunk server count"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// SaunaFSCluster is the Schema for the saunafsclusters API
-type SaunaFSCluster struct {
+// LeilFSCluster is the Schema for the saunafsclusters API
+type LeilFSCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   SaunaFSClusterSpec   `json:"spec,omitempty"`
-	Status SaunaFSClusterStatus `json:"status,omitempty"`
+	Spec   LeilFSClusterSpec   `json:"spec,omitempty"`
+	Status LeilFSClusterStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// SaunaFSClusterList contains a list of SaunaFSCluster
-type SaunaFSClusterList struct {
+// LeilFSClusterList contains a list of LeilFSCluster
+type LeilFSClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SaunaFSCluster `json:"items"`
+	Items           []LeilFSCluster `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&SaunaFSCluster{}, &SaunaFSClusterList{})
+	SchemeBuilder.Register(&LeilFSCluster{}, &LeilFSClusterList{})
 }

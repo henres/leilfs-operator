@@ -42,8 +42,8 @@ import (
 	"github.com/henres/leilfs-operator/internal/metrics"
 )
 
-// SaunaFSClusterReconciler reconciles a SaunaFSCluster object
-type SaunaFSClusterReconciler struct {
+// LeilFSClusterReconciler reconciles a LeilFSCluster object
+type LeilFSClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -210,10 +210,10 @@ func masterPodAntiAffinity(stsName string) *corev1.Affinity {
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 
-func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	cluster := &saunafsv1alpha1.SaunaFSCluster{}
+	cluster := &saunafsv1alpha1.LeilFSCluster{}
 	if err := r.Get(ctx, req.NamespacedName, cluster); err != nil {
 		if errors.IsNotFound(err) {
 			// Cluster was deleted: drop all of its metrics so Prometheus
@@ -223,7 +223,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger.Info("Reconciling SaunaFSCluster", "name", cluster.Name)
+	logger.Info("Reconciling LeilFSCluster", "name", cluster.Name)
 
 	// Snapshot the cluster object BEFORE any reconcile step mutates its status,
 	// so the MergePatch below captures all status changes made during reconcile.
@@ -233,7 +233,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var reconcileErr error
 	steps := []struct {
 		name string
-		fn   func(context.Context, *saunafsv1alpha1.SaunaFSCluster) error
+		fn   func(context.Context, *saunafsv1alpha1.LeilFSCluster) error
 	}{
 		{"goals configmap", r.reconcileGoalsConfigMap},
 		{"migrate legacy master objects", r.migrateMasterToStatefulSet},
@@ -286,7 +286,7 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if err := r.Status().Patch(ctx, cluster, statusPatchBase); err != nil {
-		logger.Error(err, "Failed to update SaunaFSCluster status")
+		logger.Error(err, "Failed to update LeilFSCluster status")
 		return ctrl.Result{}, err
 	}
 
@@ -307,13 +307,13 @@ func (r *SaunaFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // publishMetrics updates Prometheus collectors from the freshly
 // reconciled cluster state. It is best-effort: any errors while
 // counting auto-discovered PVs are logged and don't fail the reconcile.
-func (r *SaunaFSClusterReconciler) publishMetrics(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, reconcileErr error) {
+func (r *LeilFSClusterReconciler) publishMetrics(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, reconcileErr error) {
 	logger := log.FromContext(ctx)
 	ns := cluster.Namespace
 	name := cluster.Name
 
 	// Cluster info: tag with the master image so dashboards can group by
-	// SaunaFS version. Empty string when the user didn't pin an image.
+	// LeilFS version. Empty string when the user didn't pin an image.
 	version := cluster.Spec.Master.Image
 	metrics.ClusterInfo.WithLabelValues(ns, name, version).Set(1)
 
@@ -390,7 +390,7 @@ func (r *SaunaFSClusterReconciler) publishMetrics(ctx context.Context, cluster *
 // (both manually declared and auto-discovered) whose desired replicas
 // are all ready. We list by label rather than enumerating spec entries
 // so auto-discover STSes are included.
-func (r *SaunaFSClusterReconciler) countReadyChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+func (r *LeilFSClusterReconciler) countReadyChunkServers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) int32 {
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList,
 		client.InNamespace(cluster.Namespace),
@@ -413,7 +413,7 @@ func (r *SaunaFSClusterReconciler) countReadyChunkServers(ctx context.Context, c
 
 // countTotalChunkServers returns the total number of chunk-server
 // StatefulSets currently managed by this cluster (manual + auto).
-func (r *SaunaFSClusterReconciler) countTotalChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+func (r *LeilFSClusterReconciler) countTotalChunkServers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) int32 {
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList,
 		client.InNamespace(cluster.Namespace),
@@ -428,7 +428,7 @@ func (r *SaunaFSClusterReconciler) countTotalChunkServers(ctx context.Context, c
 }
 
 // countReadyMetaloggers returns the number of ready metalogger replicas.
-func (r *SaunaFSClusterReconciler) countReadyMetaloggers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+func (r *LeilFSClusterReconciler) countReadyMetaloggers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) int32 {
 	if cluster.Spec.Metalogger == nil {
 		return 0
 	}
@@ -447,7 +447,7 @@ func (r *SaunaFSClusterReconciler) countReadyMetaloggers(ctx context.Context, cl
 // headless Service) so the new unified master StatefulSet can take over.
 // It also renames the standalone master PVC to match the VolumeClaimTemplate
 // naming convention used by the new StatefulSet.
-func (r *SaunaFSClusterReconciler) migrateMasterToStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) migrateMasterToStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	name := fmt.Sprintf("%s-master", cluster.Name)
 
 	// 1. Delete legacy DaemonSet if present.
@@ -499,7 +499,7 @@ func (r *SaunaFSClusterReconciler) migrateMasterToStatefulSet(ctx context.Contex
 //
 // When spec.goals is empty the ConfigMap is deleted (if it existed) and the
 // master uses its built-in default goals.
-func (r *SaunaFSClusterReconciler) reconcileGoalsConfigMap(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileGoalsConfigMap(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	cmName := fmt.Sprintf("%s-master-goals", cluster.Name)
 
 	if len(cluster.Spec.Goals) == 0 {
@@ -589,7 +589,7 @@ func buildGoalsConfig(goals []saunafsv1alpha1.GoalSpec) (goalsFile, masterSnippe
 	return sb.String(), masterSnippet
 }
 
-func masterContainerPorts(cluster *saunafsv1alpha1.SaunaFSCluster) []corev1.ContainerPort {
+func masterContainerPorts(cluster *saunafsv1alpha1.LeilFSCluster) []corev1.ContainerPort {
 	if len(cluster.Spec.Master.Ports) > 0 {
 		ports := make([]corev1.ContainerPort, len(cluster.Spec.Master.Ports))
 		for i, p := range cluster.Spec.Master.Ports {
@@ -606,7 +606,7 @@ func masterContainerPorts(cluster *saunafsv1alpha1.SaunaFSCluster) []corev1.Cont
 
 // ── Master Service ──────────────────────────────────────────────────────────
 
-func (r *SaunaFSClusterReconciler) reconcileMasterService(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileMasterService(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	name := fmt.Sprintf("%s-master", cluster.Name)
 	svcType := cluster.Spec.Master.ServiceType
 	if svcType == "" {
@@ -670,7 +670,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterService(ctx context.Context, c
 
 // ── Chunk StatefulSets ──────────────────────────────────────────────────────
 
-func (r *SaunaFSClusterReconciler) reconcileChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileChunkServers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	for i := range cluster.Spec.Chunk.Servers {
 		srv := &cluster.Spec.Chunk.Servers[i]
 		if err := r.reconcileChunkHeadlessService(ctx, cluster, srv); err != nil {
@@ -689,7 +689,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkServers(ctx context.Context, cl
 // reconcileChunkHeadlessService ensures the Headless Service referenced by
 // the chunk StatefulSet's ServiceName field exists. Without it, the StatefulSet
 // controller cannot assign stable DNS names to pods and may refuse to start.
-func (r *SaunaFSClusterReconciler) reconcileChunkHeadlessService(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
+func (r *LeilFSClusterReconciler) reconcileChunkHeadlessService(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
 	name := fmt.Sprintf("%s-chunk-%s", cluster.Name, srv.Name)
 	desired := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -731,7 +731,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkHeadlessService(ctx context.Con
 // sfshdd.cfg file for the given chunk server. sfshdd.cfg lists one storage
 // path per line; the chunkserver reads it at startup to discover its disks.
 // Without this file the chunkserver starts but stores nothing.
-func (r *SaunaFSClusterReconciler) reconcileChunkHddConfigMap(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
+func (r *LeilFSClusterReconciler) reconcileChunkHddConfigMap(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
 	cmName := fmt.Sprintf("%s-chunk-%s-hdd", cluster.Name, srv.Name)
 
 	var sb strings.Builder
@@ -762,7 +762,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkHddConfigMap(ctx context.Contex
 	return r.Update(ctx, existing)
 }
 
-func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
+func (r *LeilFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, srv *saunafsv1alpha1.ChunkServerSpec) error {
 	name := fmt.Sprintf("%s-chunk-%s", cluster.Name, srv.Name)
 
 	image := srv.Image
@@ -848,7 +848,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 					Tolerations: srv.Tolerations,
 					// Each chunk server is pinned to a dedicated node (nodeName).
 					// hostNetwork=true makes the chunk server register with the
-					// master using the node's routable IP so that external SaunaFS
+					// master using the node's routable IP so that external LeilFS
 					// clients (when expose.enabled) can reach it directly.
 					// ClusterFirstWithHostNet preserves in-cluster DNS.
 					HostNetwork: exposeEnabled(cluster),
@@ -883,7 +883,7 @@ func (r *SaunaFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context
 	return r.createOrUpdateStatefulSet(ctx, desired)
 }
 
-func chunkContainerPorts(cluster *saunafsv1alpha1.SaunaFSCluster) []corev1.ContainerPort {
+func chunkContainerPorts(cluster *saunafsv1alpha1.LeilFSCluster) []corev1.ContainerPort {
 	if len(cluster.Spec.Chunk.Ports) > 0 {
 		ports := make([]corev1.ContainerPort, len(cluster.Spec.Chunk.Ports))
 		for i, p := range cluster.Spec.Chunk.Ports {
@@ -936,7 +936,7 @@ func buildChunkVolumes(srv *saunafsv1alpha1.ChunkServerSpec) ([]corev1.VolumeMou
 // selector and creates one chunkserver StatefulSet per discovered PV. Each PV
 // gets a dedicated PVC and StatefulSet, mirroring the manual ChunkServerSpec
 // pattern but driven entirely by PV existence.
-func (r *SaunaFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	ad := cluster.Spec.Chunk.AutoDiscover
 	if ad == nil || !ad.Enabled {
 		return nil
@@ -1038,7 +1038,7 @@ func (r *SaunaFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context
 }
 
 // ensureAutoDiscoverPVC creates a PVC that binds to a specific PV if it doesn't exist.
-func (r *SaunaFSClusterReconciler) ensureAutoDiscoverPVC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, pv *corev1.PersistentVolume, pvcName string) error {
+func (r *LeilFSClusterReconciler) ensureAutoDiscoverPVC(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, pv *corev1.PersistentVolume, pvcName string) error {
 	existing := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: cluster.Namespace}, existing)
 	if err == nil {
@@ -1134,8 +1134,8 @@ func sanitizeName(s string) string {
 	return string(result)
 }
 
-// saunafsLabel converts a string to a valid SaunaFS LABEL value.
-// SaunaFS labels must be alphanumeric with underscores only (no hyphens).
+// saunafsLabel converts a string to a valid LeilFS LABEL value.
+// LeilFS labels must be alphanumeric with underscores only (no hyphens).
 func saunafsLabel(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, "-", "_")
@@ -1152,7 +1152,7 @@ func saunafsLabel(s string) string {
 
 // ── CGI Interface Deployment ─────────────────────────────────────────────────
 
-func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileInterface(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	iface := &cluster.Spec.WebUI
 
 	// Skip if not explicitly enabled.
@@ -1255,14 +1255,14 @@ func (r *SaunaFSClusterReconciler) reconcileInterface(ctx context.Context, clust
 // ── Expose NodePort Service ──────────────────────────────────────────────────
 
 // reconcileExposeService creates (or deletes) a NodePort Service that lets
-// external SaunaFS clients connect to the master and mount the filesystem.
-// The service targets the master pod on the standard SaunaFS client port (9421)
+// external LeilFS clients connect to the master and mount the filesystem.
+// The service targets the master pod on the standard LeilFS client port (9421)
 // and, optionally, the admin port (9419).
 //
-// Usage from a SaunaFS client node (replace <node-ip> and <node-port>):
+// Usage from a LeilFS client node (replace <node-ip> and <node-port>):
 //
 //	saunafs-mount -H <node-ip> -P <node-port> /mnt/saunafs
-func (r *SaunaFSClusterReconciler) reconcileExposeService(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileExposeService(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	expose := &cluster.Spec.Expose
 	name := fmt.Sprintf("%s-client-expose", cluster.Name)
 
@@ -1345,7 +1345,7 @@ func (r *SaunaFSClusterReconciler) reconcileExposeService(ctx context.Context, c
 }
 
 // exposeEnabled returns true when the cluster's Expose flag is set.
-func exposeEnabled(cluster *saunafsv1alpha1.SaunaFSCluster) bool {
+func exposeEnabled(cluster *saunafsv1alpha1.LeilFSCluster) bool {
 	return cluster.Spec.Expose.Enabled != nil && *cluster.Spec.Expose.Enabled
 }
 
@@ -1358,7 +1358,7 @@ func exposeEnabled(cluster *saunafsv1alpha1.SaunaFSCluster) bool {
 //
 //	NFS client  ──►  NodePort:2049  ──►  NFS-Ganesha pod
 //	                                       ├─ saunafs-client sidecar (FUSE)
-//	                                       │    mounts SaunaFS → /exports
+//	                                       │    mounts LeilFS → /exports
 //	                                       └─ izdock/nfs-ganesha
 //	                                            re-exports /exports via VFS FSAL
 //
@@ -1366,7 +1366,7 @@ func exposeEnabled(cluster *saunafsv1alpha1.SaunaFSCluster) bool {
 // emptyDir volume (/exports). NFS-Ganesha then exports that local path.
 // Both containers are privileged so the FUSE mount is visible across them
 // via mountPropagation:Bidirectional.
-func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	nfs := &cluster.Spec.NFS
 	name := fmt.Sprintf("%s-nfs", cluster.Name)
 
@@ -1408,8 +1408,8 @@ func (r *SaunaFSClusterReconciler) reconcileNFS(ctx context.Context, cluster *sa
 	masterHost := fmt.Sprintf("%s-master.%s.svc.cluster.local", cluster.Name, cluster.Namespace)
 
 	// ── ConfigMap: ganesha.conf ──────────────────────────────────────────────
-	// Format follows the official SaunaFS documentation exactly.
-	// Ganesha connects directly to the SaunaFS master via the SaunaFS FSAL —
+	// Format follows the official LeilFS documentation exactly.
+	// Ganesha connects directly to the LeilFS master via the LeilFS FSAL —
 	// no local FUSE mount needed.
 	// NFS_Core_Param is required so that NFSv4 clients can resolve the pseudo
 	// path "/". Without mount_path_pseudo = true the client sees an empty
@@ -1484,9 +1484,9 @@ EXPORT
 				Spec: corev1.PodSpec{
 					NodeSelector: nfs.NodeSelector,
 					Tolerations:  nfs.Tolerations,
-					// Wait for the SaunaFS master to accept TCP connections on
+					// Wait for the LeilFS master to accept TCP connections on
 					// port 9421 before starting ganesha. Without this guard,
-					// ganesha tries to mount the SaunaFS filesystem during its
+					// ganesha tries to mount the LeilFS filesystem during its
 					// startup sequence and, if the master is not yet ready (e.g.
 					// after a simultaneous restart), it fails permanently — it
 					// does not retry the mount on its own.
@@ -1505,7 +1505,7 @@ EXPORT
 					},
 					Containers: []corev1.Container{
 						{
-							// Single container: ganesha.nfsd with the SaunaFS
+							// Single container: ganesha.nfsd with the LeilFS
 							// FSAL connects directly to the master — no FUSE
 							// sidecar needed.
 							Name:            "nfs-ganesha",
@@ -1557,8 +1557,8 @@ EXPORT
 							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 						{
-							// ganesha.conf with SaunaFS FSAL settings,
-							// generated from the SaunaFSCluster spec.
+							// ganesha.conf with LeilFS FSAL settings,
+							// generated from the LeilFSCluster spec.
 							Name: "ganesha-conf",
 							VolumeSource: corev1.VolumeSource{
 								ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -1624,7 +1624,7 @@ EXPORT
 // chunkDNSPolicy returns ClusterFirstWithHostNet when hostNetwork is active
 // (expose enabled) so that in-cluster DNS keeps working, and ClusterFirst
 // otherwise.
-func chunkDNSPolicy(cluster *saunafsv1alpha1.SaunaFSCluster) corev1.DNSPolicy {
+func chunkDNSPolicy(cluster *saunafsv1alpha1.LeilFSCluster) corev1.DNSPolicy {
 	if exposeEnabled(cluster) {
 		return corev1.DNSClusterFirstWithHostNet
 	}
@@ -1645,7 +1645,7 @@ func chunkDNSPolicy(cluster *saunafsv1alpha1.SaunaFSCluster) corev1.DNSPolicy {
 // The headless service gives each replica a stable DNS name:
 //
 //	<cluster>-metalogger-<i>.<cluster>-metalogger.<ns>.svc.cluster.local
-func (r *SaunaFSClusterReconciler) reconcileMetaloggers(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileMetaloggers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	ml := cluster.Spec.Metalogger
 	stsName := fmt.Sprintf("%s-metalogger", cluster.Name)
 	svcName := stsName
@@ -1804,7 +1804,7 @@ func (r *SaunaFSClusterReconciler) reconcileMetaloggers(ctx context.Context, clu
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-func (r *SaunaFSClusterReconciler) createOrUpdateStatefulSet(ctx context.Context, desired *appsv1.StatefulSet) error {
+func (r *LeilFSClusterReconciler) createOrUpdateStatefulSet(ctx context.Context, desired *appsv1.StatefulSet) error {
 	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if errors.IsNotFound(err) {
@@ -1826,7 +1826,7 @@ func (r *SaunaFSClusterReconciler) createOrUpdateStatefulSet(ctx context.Context
 	return r.Update(ctx, existing)
 }
 
-func (r *SaunaFSClusterReconciler) createOrUpdateDeployment(ctx context.Context, desired *appsv1.Deployment) error {
+func (r *LeilFSClusterReconciler) createOrUpdateDeployment(ctx context.Context, desired *appsv1.Deployment) error {
 	existing := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if errors.IsNotFound(err) {
@@ -1863,7 +1863,7 @@ func (r *SaunaFSClusterReconciler) createOrUpdateDeployment(ctx context.Context,
 // IMPORTANT: PVCs created by VolumeClaimTemplates are NOT deleted when the
 // StatefulSet is deleted — they survive CR deletion just like the old
 // standalone PVC. This is the intended behaviour for metadata persistence.
-func (r *SaunaFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	stsName := fmt.Sprintf("%s-master", cluster.Name)
 	hlSvcName := fmt.Sprintf("%s-master-hl", cluster.Name)
 
@@ -2318,7 +2318,7 @@ done
 //
 // The operator never renews nor acquires the Lease itself.
 // It requeues every leaseObserveInterval so changes are picked up promptly.
-func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	logger := log.FromContext(ctx)
 
 	if cluster.Spec.Shadow == nil {
@@ -2415,7 +2415,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHA(ctx context.Context, cluste
 
 // reconcileMasterHARBAC ensures the ServiceAccount, Role, and RoleBinding that
 // allow master pods to read/patch the HA Lease exist in the cluster namespace.
-func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) error {
+func (r *LeilFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	if cluster.Spec.Shadow == nil {
 		return nil
 	}
@@ -2548,7 +2548,7 @@ func (r *SaunaFSClusterReconciler) reconcileMasterHARBAC(ctx context.Context, cl
 // app label selector (unchanged). When a shadow pod is elected we switch to
 // the active-master label so the Service follows the pod regardless of its
 // StatefulSet ordinal.
-func (r *SaunaFSClusterReconciler) setMasterServiceSelector(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster, activePodName string) error {
+func (r *LeilFSClusterReconciler) setMasterServiceSelector(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, activePodName string) error {
 	svcName := fmt.Sprintf("%s-master", cluster.Name)
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: cluster.Namespace}, svc); err != nil {
@@ -2565,7 +2565,7 @@ func (r *SaunaFSClusterReconciler) setMasterServiceSelector(ctx context.Context,
 // setPodActiveMasterLabel adds or removes the "saunafs.io/active-master=true"
 // label on a pod. Kubernetes does not allow editing pod spec labels via the
 // standard Update — we must use a Patch.
-func (r *SaunaFSClusterReconciler) setPodActiveMasterLabel(ctx context.Context, pod *corev1.Pod, active bool) error {
+func (r *LeilFSClusterReconciler) setPodActiveMasterLabel(ctx context.Context, pod *corev1.Pod, active bool) error {
 	patch := client.MergeFrom(pod.DeepCopy())
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
@@ -2581,7 +2581,7 @@ func (r *SaunaFSClusterReconciler) setPodActiveMasterLabel(ctx context.Context, 
 // listMasterPods returns the pod currently acting as master, identified by
 // cluster.Status.ActiveMaster.  Returns an empty slice if no active master is
 // recorded yet (bootstrap) or if the pod no longer exists.
-func (r *SaunaFSClusterReconciler) listMasterPods(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) ([]corev1.Pod, error) {
+func (r *LeilFSClusterReconciler) listMasterPods(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) ([]corev1.Pod, error) {
 	if cluster.Status.ActiveMaster == "" {
 		return nil, nil
 	}
@@ -2599,7 +2599,7 @@ func (r *SaunaFSClusterReconciler) listMasterPods(ctx context.Context, cluster *
 
 // listShadowPods returns all master StatefulSet pods that are NOT the current
 // active master (i.e. they run as shadow or are starting up).
-func (r *SaunaFSClusterReconciler) listShadowPods(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) ([]corev1.Pod, error) {
+func (r *LeilFSClusterReconciler) listShadowPods(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) ([]corev1.Pod, error) {
 	allPods, err := r.listAllMasterStatefulSetPods(ctx, cluster)
 	if err != nil {
 		return nil, err
@@ -2614,7 +2614,7 @@ func (r *SaunaFSClusterReconciler) listShadowPods(ctx context.Context, cluster *
 }
 
 // listAllMasterStatefulSetPods lists all pods belonging to the unified master StatefulSet.
-func (r *SaunaFSClusterReconciler) listAllMasterStatefulSetPods(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) ([]corev1.Pod, error) {
+func (r *LeilFSClusterReconciler) listAllMasterStatefulSetPods(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	err := r.List(ctx, podList,
 		client.InNamespace(cluster.Namespace),
@@ -2627,7 +2627,7 @@ func (r *SaunaFSClusterReconciler) listAllMasterStatefulSetPods(ctx context.Cont
 }
 
 // countReadyShadows counts ready shadow pods (all master StatefulSet pods except the active master).
-func (r *SaunaFSClusterReconciler) countReadyShadows(ctx context.Context, cluster *saunafsv1alpha1.SaunaFSCluster) int32 {
+func (r *LeilFSClusterReconciler) countReadyShadows(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) int32 {
 	if cluster.Spec.Shadow == nil {
 		return 0
 	}
@@ -2659,9 +2659,9 @@ func isPodRunningReady(pod *corev1.Pod) bool {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *LeilFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&saunafsv1alpha1.SaunaFSCluster{}).
+		For(&saunafsv1alpha1.LeilFSCluster{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
@@ -2676,8 +2676,8 @@ func (r *SaunaFSClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // pvToClusterRequests maps a PV change to reconcile requests for all
-// SaunaFSCluster resources that have autoDiscover enabled.
-func (r *SaunaFSClusterReconciler) pvToClusterRequests(ctx context.Context, obj client.Object) []ctrl.Request {
+// LeilFSCluster resources that have autoDiscover enabled.
+func (r *LeilFSClusterReconciler) pvToClusterRequests(ctx context.Context, obj client.Object) []ctrl.Request {
 	pv, ok := obj.(*corev1.PersistentVolume)
 	if !ok {
 		return nil
@@ -2687,8 +2687,8 @@ func (r *SaunaFSClusterReconciler) pvToClusterRequests(ctx context.Context, obj 
 		return nil
 	}
 
-	// List all SaunaFSCluster resources.
-	clusterList := &saunafsv1alpha1.SaunaFSClusterList{}
+	// List all LeilFSCluster resources.
+	clusterList := &saunafsv1alpha1.LeilFSClusterList{}
 	if err := r.List(ctx, clusterList); err != nil {
 		return nil
 	}

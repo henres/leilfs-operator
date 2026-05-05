@@ -1,6 +1,6 @@
 ---
 name: dev-workflow
-description: Build, load, deploy, and test workflow for the saunafs-operator on the local 4-VM Lima k3s cluster (sfs-lima context). Replaces the older Kind-based workflow.
+description: Build, load, deploy, and test workflow for the leilfs-operator on the local 4-VM Lima k3s cluster (sfs-lima context). Replaces the older Kind-based workflow.
 compatibility: opencode
 ---
 
@@ -8,17 +8,17 @@ compatibility: opencode
 
 - kubectl context: `sfs-lima` (local Lima k3s cluster, 1 control-plane
   + 3 workers). Verify with `kubectl config current-context`.
-- Namespace for the operator Deployment: `saunafs-operator-system`
+- Namespace for the operator Deployment: `leilfs-operator-system`
 - Namespace for the sample CR: `default`
-- CR name: `saunafscluster-sample`
+- CR name: `leilfscluster-sample`
 
-The historical `kind-saunafs-operator` Kind cluster has been removed.
+The historical `kind-leilfs-operator` Kind cluster has been removed.
 
 ## Images
 
-- Registry: `ghcr.io/henres/saunafs-container/` (master, chunkserver,
+- Registry: `ghcr.io/henres/leilfs-container/` (master, chunkserver,
   metalogger, cgiserver, client) and
-  `ghcr.io/henres/saunafs-operator/saunafs-operator` (operator).
+  `ghcr.io/henres/leilfs-operator/leilfs-operator` (operator).
 - Pull secret: `ghcr-pull-secret`, attached to the `default` SA AND to
   `<cluster>-master` SA (the operator copies pull secrets from the
   default SA to the master SA on every reconcile).
@@ -28,7 +28,7 @@ The historical `kind-saunafs-operator` Kind cluster has been removed.
 
 ### Build operator image
 ```sh
-make docker-build IMG=ghcr.io/henres/saunafs-operator/saunafs-operator:dev
+make docker-build IMG=ghcr.io/henres/leilfs-operator/leilfs-operator:dev
 ```
 
 ### Load images into the Lima cluster
@@ -43,14 +43,14 @@ local Docker daemon and imports it into containerd on each Lima VM via
 
 ### Restart the operator after reload
 ```sh
-kubectl --context sfs-lima -n saunafs-operator-system \
-  rollout restart deployment/saunafs-operator-controller-manager
+kubectl --context sfs-lima -n leilfs-operator-system \
+  rollout restart deployment/leilfs-operator-controller-manager
 ```
 
 ### After changing API types (CRD fields, status, printcolumns)
 ```sh
 make manifests
-kubectl --context sfs-lima apply -f config/crd/bases/saunafs.saunafs-operator.io_saunafsclusters.yaml
+kubectl --context sfs-lima apply -f config/crd/bases/leilfs.leilfs-operator.io_leilfsclusters.yaml
 ```
 
 ### After changing controller annotations (RBAC, etc.)
@@ -62,31 +62,31 @@ kubectl --context sfs-lima apply -f config/rbac/role.yaml
 
 ### After changing only controller logic (no API or RBAC change)
 ```sh
-make docker-build IMG=ghcr.io/henres/saunafs-operator/saunafs-operator:dev
+make docker-build IMG=ghcr.io/henres/leilfs-operator/leilfs-operator:dev
 bash ../sfs-test-env/scripts/load-images.sh
-kubectl --context sfs-lima -n saunafs-operator-system \
-  rollout restart deployment/saunafs-operator-controller-manager
+kubectl --context sfs-lima -n leilfs-operator-system \
+  rollout restart deployment/leilfs-operator-controller-manager
 ```
 
 ### Watch master pods
 ```sh
-kubectl --context sfs-lima get pods -l app=saunafscluster-sample-master -w
+kubectl --context sfs-lima get pods -l app=leilfscluster-sample-master -w
 ```
 
 ### Watch the HA Lease
 ```sh
-kubectl --context sfs-lima get lease saunafscluster-sample-master-ha -w
+kubectl --context sfs-lima get lease leilfscluster-sample-master-ha -w
 ```
 
 ### Check sidecar logs
 ```sh
-kubectl --context sfs-lima logs saunafscluster-sample-master-0 -c ha-sidecar -f
-kubectl --context sfs-lima logs saunafscluster-sample-master-1 -c ha-sidecar -f
+kubectl --context sfs-lima logs leilfscluster-sample-master-0 -c ha-sidecar -f
+kubectl --context sfs-lima logs leilfscluster-sample-master-1 -c ha-sidecar -f
 ```
 
 ### Check init-container logs
 ```sh
-kubectl --context sfs-lima logs saunafscluster-sample-master-0 -c init-config
+kubectl --context sfs-lima logs leilfscluster-sample-master-0 -c init-config
 ```
 
 ### Run failover test
@@ -118,7 +118,7 @@ See `.opencode/skills/operator-reconcile/SKILL.md` for the full picture.
 ## Relevant directories
 
 ```
-saunafs-operator/
+leilfs-operator/
   api/v1alpha1/              # CRD types
   config/
     crd/bases/               # Generated CRD YAML

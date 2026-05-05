@@ -1,12 +1,12 @@
 ---
 name: ha-lease-election
-description: Complete reference for the saunafs-operator HA master election protocol using Kubernetes Leases, including init-container, sidecar shell scripts, and failover behaviour.
+description: Complete reference for the leilfs-operator HA master election protocol using Kubernetes Leases, including init-container, sidecar shell scripts, and failover behaviour.
 compatibility: opencode
 ---
 
 ## Overview
 
-The HA system elects one active master per SaunafsCluster using a Kubernetes Lease object.
+The HA system elects one active master per LeilfsCluster using a Kubernetes Lease object.
 All pods in the master StatefulSet run both the saunafs-master process AND a shell sidecar that
 participates in the election.
 
@@ -122,7 +122,7 @@ The operator does NOT write to the Lease after creation; election is fully peer-
 
 ## Files
 
-- Controller: `internal/controller/saunafscluster_controller.go`
+- Controller: `internal/controller/leilfscluster_controller.go`
   - `reconcileMasterHA` ~line 1778
   - `reconcileMasterHARBAC` ~line 1877
   - `reconcileMasterStatefulSet` ~line 1356 (init-container + sidecar scripts)

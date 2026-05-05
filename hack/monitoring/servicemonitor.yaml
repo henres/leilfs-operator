@@ -1,4 +1,4 @@
-# Scrape the saunafs-operator manager metrics endpoint exposed over
+# Scrape the leilfs-operator manager metrics endpoint exposed over
 # plain HTTP on port 8080. We deliberately drop the kube-rbac-proxy
 # sidecar to keep the dev/lab setup minimal — front it with a proper
 # auth proxy in production.
@@ -11,15 +11,15 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: saunafs-operator-controller-manager
+  name: leilfs-operator-controller-manager
   namespace: monitoring
   labels:
-    app.kubernetes.io/part-of: saunafs-operator
+    app.kubernetes.io/part-of: leilfs-operator
     release: kube-prom-stack
 spec:
   namespaceSelector:
     matchNames:
-      - saunafs-operator-system
+      - leilfs-operator-system
   selector:
     matchLabels:
       control-plane: controller-manager

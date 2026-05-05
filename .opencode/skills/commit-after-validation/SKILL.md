@@ -1,6 +1,6 @@
 ---
 name: commit-after-validation
-description: Checklist and procedure to commit changes in the saunafs-operator repo after tests have passed, following the Conventional Commits style used in this project.
+description: Checklist and procedure to commit changes in the leilfs-operator repo after tests have passed, following the Conventional Commits style used in this project.
 compatibility: opencode
 ---
 
@@ -34,10 +34,10 @@ Forget this and the CRD YAML will be stale.
 
 ### 5. End-to-end / integration (if the change touches HA or reconcile logic)
 ```sh
-make docker-build IMG=ghcr.io/henres/saunafs-operator/saunafs-operator:dev
+make docker-build IMG=ghcr.io/henres/leilfs-operator/leilfs-operator:dev
 bash ../sfs-test-env/scripts/load-images.sh
-kubectl --context sfs-lima -n saunafs-operator-system \
-  rollout restart deployment/saunafs-operator-controller-manager
+kubectl --context sfs-lima -n leilfs-operator-system \
+  rollout restart deployment/leilfs-operator-controller-manager
 bash test/master-failover.sh
 ```
 
@@ -79,7 +79,7 @@ feat(ha): unified master StatefulSet with automatic failover and failback
 fix(ha): correct holderIdentity parsing and propagate imagePullSecrets to master SA
 fix(ha): harden master HA — expose selector, storage precedence, RBAC scope, observability
 test(plugin): add filegoal smoke tests (get, set, error case)
-feat(monitoring): add Grafana dashboard for SaunaFS clusters
+feat(monitoring): add Grafana dashboard for LeilFS clusters
 chore(metrics): drop kube-rbac-proxy sidecar
 fix(rbac): grant pods:delete to the controller
 ```
@@ -101,8 +101,8 @@ git diff
 git status
 
 # Stage selectively (prefer explicit over `git add -A`)
-git add internal/controller/saunafscluster_controller.go
-git add api/v1alpha1/saunafscluster_types.go
+git add internal/controller/leilfscluster_controller.go
+git add api/v1alpha1/leilfscluster_types.go
 git add config/crd/bases/   # only if make manifests was run
 
 # Commit

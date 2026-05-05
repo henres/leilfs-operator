@@ -1,13 +1,13 @@
 ---
 name: operator-reconcile
-description: Patterns, helpers, and conventions used in the saunafs-operator reconcile loop, including StorageClass precedence, RBAC helpers, imagePullSecrets propagation, and CRD/status update rules.
+description: Patterns, helpers, and conventions used in the leilfs-operator reconcile loop, including StorageClass precedence, RBAC helpers, imagePullSecrets propagation, and CRD/status update rules.
 compatibility: opencode
 ---
 
 ## Overview
 
-The operator is a standard controller-runtime reconciler for the `SaunafsCluster` CRD.
-Main file: `internal/controller/saunafscluster_controller.go` (~2148 lines).
+The operator is a standard controller-runtime reconciler for the `LeilfsCluster` CRD.
+Main file: `internal/controller/leilfscluster_controller.go` (~2148 lines).
 
 ## Reconcile entry point
 
@@ -41,7 +41,7 @@ master spec's config.
 
 `reconcileMasterHARBAC` copies `imagePullSecrets` from the `default` ServiceAccount in
 the same namespace to the `<cluster>-master` ServiceAccount on every reconcile.
-This ensures the StatefulSet pods can pull from `ghcr.io/henres/saunafs-container/`.
+This ensures the StatefulSet pods can pull from `ghcr.io/henres/leilfs-container/`.
 
 ```go
 // pseudocode
@@ -89,7 +89,7 @@ use `leilfs.io/active-master=true` in HA mode.
 
 ## Status fields
 
-`SaunafsClusterStatus` has:
+`LeilfsClusterStatus` has:
 - `ActiveMaster string` — pod name of the current Lease holder
 - `ReadyShadows []string` — names of non-holder master pods
 
@@ -97,7 +97,7 @@ Updated at the end of each reconcile by reading the Lease.
 
 ## CRD print columns
 
-Defined in `api/v1alpha1/saunafscluster_types.go`:
+Defined in `api/v1alpha1/leilfscluster_types.go`:
 
 ```go
 // +kubebuilder:printcolumn:name="ActiveMaster",type=string,JSONPath=".status.activeMaster"
@@ -105,7 +105,7 @@ Defined in `api/v1alpha1/saunafscluster_types.go`:
 ```
 
 **Always run `make manifests` after changing API types** to regenerate
-`config/crd/bases/saunafs.saunafs-operator.io_saunafsclusters.yaml`.
+`config/crd/bases/leilfs.leilfs-operator.io_leilfsclusters.yaml`.
 
 ## Controller-level RBAC
 
@@ -118,7 +118,7 @@ Example (controller needs to delete Pods to drive rolling restarts):
 
 ```go
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
-func (r *SaunaFSClusterReconciler) reconcileSomething(...) { ... }
+func (r *LeilFSClusterReconciler) reconcileSomething(...) { ... }
 ```
 
 Then `make manifests` updates `config/rbac/role.yaml` and
@@ -151,5 +151,5 @@ These are known gaps and are not blocking but should be addressed before product
 
 ## Unit tests
 
-Tests are scaffolded in `internal/controller/saunafscluster_controller_test.go` but contain
+Tests are scaffolded in `internal/controller/leilfscluster_controller_test.go` but contain
 no assertions on the StatefulSet, Service, Lease, or RBAC objects yet.

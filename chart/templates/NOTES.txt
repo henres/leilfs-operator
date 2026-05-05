@@ -22,7 +22,7 @@ You can create a LeilFSCluster resource to deploy a distributed LeilFS cluster:
           nodeName: <your-node-name>
           mountPaths:
             - path: /mnt/hdd001
-              hostPath: /data/saunafs
+              hostPath: /data/leilfs
   EOF
 
 Check the operator logs:

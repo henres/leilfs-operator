@@ -8,13 +8,13 @@
 
 ## Context
 
-SaunaFS masters operate in two personalities: `master` (active, serves all metadata I/O) and `shadow` (passive replica, syncs from master). Only one master may be active at a time. The operator manages a `StatefulSet` with two replicas: one intended to run as master, the other as shadow.
+LeilFS masters operate in two personalities: `master` (active, serves all metadata I/O) and `shadow` (passive replica, syncs from master). Only one master may be active at a time. The operator manages a `StatefulSet` with two replicas: one intended to run as master, the other as shadow.
 
 The operator needs a mechanism to:
 
 1. Elect exactly one pod as master at any given time.
 2. Detect master failure and promote the shadow with minimal downtime.
-3. Reconfigure each pod's personality (`PERSONALITY = master|shadow` in `sfsmaster.cfg`) before SaunaFS starts.
+3. Reconfigure each pod's personality (`PERSONALITY = master|shadow` in `sfsmaster.cfg`) before LeilFS starts.
 
 Several approaches were considered.
 
@@ -68,7 +68,7 @@ Each master pod runs an inline shell script sidecar that interacts directly with
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  StatefulSet  saunafscluster-<name>-master          │
+│  StatefulSet  leilfscluster-<name>-master          │
 │                                                     │
 │  Pod master-0              Pod master-1             │
 │  ┌─────────────────┐       ┌─────────────────┐      │
@@ -167,4 +167,4 @@ The operator's own `ClusterRole` is extended with permissions to manage `Service
 
 - [Kubernetes Lease API](https://kubernetes.io/docs/concepts/architecture/leases/)
 - [Leader election in Kubernetes using Lease objects](https://kubernetes.io/blog/2023/12/20/kubernetes-1-29-feature-leader-election-ga/)
-- `internal/controller/saunafscluster_controller.go`: `reconcileMasterHA`, `reconcileMasterHARBAC`, `reconcileMasterStatefulSet`
+- `internal/controller/leilfscluster_controller.go`: `reconcileMasterHA`, `reconcileMasterHARBAC`, `reconcileMasterStatefulSet`

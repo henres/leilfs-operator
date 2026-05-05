@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/instance: leilfscluster-viewer-role
     app.kubernetes.io/component: rbac
-    app.kubernetes.io/created-by: saunafs-operator
-    app.kubernetes.io/part-of: saunafs-operator
+    app.kubernetes.io/created-by: leilfs-operator
+    app.kubernetes.io/part-of: leilfs-operator
     app.kubernetes.io/managed-by: kustomize
   name: leilfscluster-viewer-role
 rules:

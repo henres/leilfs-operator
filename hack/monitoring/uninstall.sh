@@ -2,7 +2,7 @@
 set -euo pipefail
 NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
 RELEASE="${MONITORING_RELEASE:-kube-prom-stack}"
-EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-saunafs-operator}"
+EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-leilfs-operator}"
 if ! kubectl config get-contexts -o name | grep -qx "${EXPECTED_CONTEXT}"; then
   echo "ERROR: kube context '${EXPECTED_CONTEXT}' not found." >&2
   exit 1

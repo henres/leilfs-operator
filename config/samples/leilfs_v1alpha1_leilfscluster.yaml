@@ -2,17 +2,17 @@ apiVersion: leilfs.leilfs-operator.io/v1alpha1
 kind: LeilFSCluster
 metadata:
   labels:
-    app.kubernetes.io/name: saunafscluster
+    app.kubernetes.io/name: leilfscluster
     app.kubernetes.io/instance: leilfscluster-sample
-    app.kubernetes.io/part-of: saunafs-operator
+    app.kubernetes.io/part-of: leilfs-operator
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: saunafs-operator
+    app.kubernetes.io/created-by: leilfs-operator
   name: leilfscluster-sample
 spec:
   master:
     image: ghcr.io/henres/leilfs-container/leilfs-master:5.9.0
     # nodeSelector:
-    #   saunafs-role: master
+    #   leilfs-role: master
     ports:
       - name: client
         containerPort: 9421
@@ -55,44 +55,44 @@ spec:
         containerPort: 9422
     servers:
       - name: worker1-hdd001
-        nodeName: saunafs-operator-worker
+        nodeName: leilfs-operator-worker
         label: worker1
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker1-hdd002
-        nodeName: saunafs-operator-worker
+        nodeName: leilfs-operator-worker
         label: worker1
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
       - name: worker2-hdd001
-        nodeName: saunafs-operator-worker2
+        nodeName: leilfs-operator-worker2
         label: worker2
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker2-hdd002
-        nodeName: saunafs-operator-worker2
+        nodeName: leilfs-operator-worker2
         label: worker2
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
       - name: worker3-hdd001
-        nodeName: saunafs-operator-worker3
+        nodeName: leilfs-operator-worker3
         label: worker3
         mountPaths:
           - path: /mnt/hdd001
             hostPath: /mnt/hdd001
       - name: worker3-hdd002
-        nodeName: saunafs-operator-worker3
+        nodeName: leilfs-operator-worker3
         label: worker3
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
   csi:
     enabled: false
-    driverName: saunafs.csi.saunafs-operator.io
+    driverName: leilfs.csi.leilfs-operator.io
     image: ghcr.io/henres/leilfs-container/leilfs-client:5.9.0
   goals:
     # EC goal for maximum efficiency (6 CS required).

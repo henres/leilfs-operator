@@ -1,6 +1,6 @@
 # Build and push the operator images to ghcr.io.
 #
-#   OPERATOR_IMAGE_TAG  – tag for the saunafs-operator image.
+#   OPERATOR_IMAGE_TAG  – tag for the leilfs-operator image.
 #                         Follows the git tag of the repo (v-prefix stripped).
 #                         Defaults to "latest".
 #
@@ -19,7 +19,7 @@ services:
     build:
       context: ..
       dockerfile: docker/operator.Dockerfile
-    image: ghcr.io/henres/leilfs-operator/saunafs-operator:${OPERATOR_IMAGE_TAG:-latest}
+    image: ghcr.io/henres/leilfs-operator/leilfs-operator:${OPERATOR_IMAGE_TAG:-latest}
 
   nfs-ganesha:
     build:

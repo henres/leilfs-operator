@@ -1,20 +1,20 @@
-# saunafs-operator
+# leilfs-operator
 
-Kubernetes operator for SaunaFS clusters. Reconciles a `SaunaFSCluster` CRD
+Kubernetes operator for LeilFS clusters. Reconciles a `LeilFSCluster` CRD
 into master/shadow StatefulSets, chunkservers, metalogger, CGI interface, and
 optional NFS-Ganesha gateway and CSI driver.
 
 ## Repository layout
 
 ```
-api/v1alpha1/                 # CRD types (SaunaFSCluster, status, printcolumns)
+api/v1alpha1/                 # CRD types (LeilFSCluster, status, printcolumns)
 cmd/main.go                   # manager entrypoint
 cmd/kubectl-leilfs/          # kubectl plugin (filegoal, etc.)
-internal/controller/          # reconciler (saunafscluster_controller.go ~2k LOC)
+internal/controller/          # reconciler (leilfscluster_controller.go ~2k LOC)
 internal/metrics/             # cluster-level Prometheus metrics
 config/crd/bases/             # generated CRD YAML (do not edit by hand)
 config/rbac/                  # generated RBAC (do not edit by hand)
-config/samples/               # sample SaunaFSCluster
+config/samples/               # sample LeilFSCluster
 docker/                       # NFS-Ganesha image build context
 hack/monitoring/              # ServiceMonitor + Grafana dashboards JSON
 test/                         # e2e scripts (master-failover.sh, etc.)

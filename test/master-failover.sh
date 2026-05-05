@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/master-failover.sh — SaunaFS HA master failover scenario
+# test/master-failover.sh — LeilFS HA master failover scenario
 #
 # Simulates a master failure and validates that the shadow automatically
 # acquires the Kubernetes Lease and promotes itself to master without any
@@ -8,21 +8,21 @@
 #
 # Scenario:
 #   1. Pre-flight: verify cluster is healthy, HA Lease exists and has a holder.
-#   2. Write test data into the SaunaFS filesystem via the NFS gateway.
+#   2. Write test data into the LeilFS filesystem via the NFS gateway.
 #   3. Simulate master failure: cordon the active master pod's node and delete
 #      the pod so the StatefulSet cannot reschedule it immediately.
 #   4. Wait for the shadow to detect the expired Lease and acquire it
 #      (~30 s max).  Verify the Lease holder changes.
 #   5. Uncordon the node so the former master can come back as shadow.
 #   6. Verify the new master pod started with PERSONALITY=master.
-#   7. Verify SaunaFSCluster status.activeMaster is updated.
+#   7. Verify LeilFSCluster status.activeMaster is updated.
 #   8. Verify the test data written in step 2 is still readable.
 #   9. Verify the former master restarted as shadow.
 #
 # Prerequisites:
-#   - Kind cluster "saunafs-operator" running with a deployed SaunaFSCluster
+#   - Kind cluster "leilfs-operator" running with a deployed LeilFSCluster
 #     that has spec.shadow set (HA mode).
-#   - kubectl context kind-saunafs-operator must be accessible.
+#   - kubectl context kind-leilfs-operator must be accessible.
 #   - docker CLI available (used to access NFS via Kind nodes).
 #
 # Usage:
@@ -31,7 +31,7 @@
 
 set -euo pipefail
 
-KUBE="kubectl --context kind-saunafs-operator"
+KUBE="kubectl --context kind-leilfs-operator"
 NS="default"
 CLUSTER="leilfscluster-sample"
 MASTER_STS="${CLUSTER}-master"
@@ -114,21 +114,21 @@ ACTIVE_NODE=$($KUBE get pod "$ACTIVE_POD" -n "$NS" -o jsonpath='{.spec.nodeName}
 pass "Active master pod '${ACTIVE_POD}' is on node '${ACTIVE_NODE}'"
 
 # =============================================================================
-step "2. Write test data into SaunaFS via NFS"
+step "2. Write test data into LeilFS via NFS"
 # =============================================================================
 TEST_FILE="failover-test-$(date +%s).txt"
 TEST_CONTENT="master-failover-sentinel-$(date -u +%Y%m%dT%H%M%SZ)"
 
 echo "    Mounting NFS inside Kind control-plane node and writing test file..."
-docker exec saunafs-operator-control-plane bash -c "
+docker exec leilfs-operator-control-plane bash -c "
     apt-get install -y -q nfs-common 2>/dev/null | tail -1
-    mkdir -p /mnt/saunafs-test
-    mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/saunafs-test 2>/dev/null || \
-        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test
-    echo '${TEST_CONTENT}' > /mnt/saunafs-test/${TEST_FILE}
+    mkdir -p /mnt/leilfs-test
+    mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/leilfs-test 2>/dev/null || \
+        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/leilfs-test
+    echo '${TEST_CONTENT}' > /mnt/leilfs-test/${TEST_FILE}
     sync
-    echo 'Write OK: ' \$(cat /mnt/saunafs-test/${TEST_FILE})
-    umount /mnt/saunafs-test
+    echo 'Write OK: ' \$(cat /mnt/leilfs-test/${TEST_FILE})
+    umount /mnt/leilfs-test
 "
 pass "Test file written: ${TEST_FILE} = '${TEST_CONTENT}'"
 
@@ -187,11 +187,11 @@ echo "$INIT_LOG" | grep -q "I am the Lease holder" || \
 pass "init-config confirmed PERSONALITY=master for ${NEW_HOLDER}"
 
 # =============================================================================
-step "7. Verify SaunaFSCluster status.activeMaster is updated"
+step "7. Verify LeilFSCluster status.activeMaster is updated"
 # =============================================================================
 # Give the operator a reconcile cycle (≤5s).
 sleep 8
-STATUS_MASTER=$($KUBE get saunafscluster "$CLUSTER" -n "$NS" \
+STATUS_MASTER=$($KUBE get leilfscluster "$CLUSTER" -n "$NS" \
     -o jsonpath='{.status.activeMaster}' 2>/dev/null || echo "")
 [ "$STATUS_MASTER" = "$NEW_HOLDER" ] || \
     fail "status.activeMaster='${STATUS_MASTER}', expected '${NEW_HOLDER}'"
@@ -206,12 +206,12 @@ $KUBE rollout restart deployment "$NFS_DEPLOY" -n "$NS"
 $KUBE rollout status deployment "$NFS_DEPLOY" -n "$NS" --timeout=90s
 
 echo "    Re-mounting NFS and reading test file..."
-FOUND=$(docker exec saunafs-operator-control-plane bash -c "
-    mkdir -p /mnt/saunafs-test
-    mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/saunafs-test 2>/dev/null || \
-        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/saunafs-test
-    cat /mnt/saunafs-test/${TEST_FILE} 2>/dev/null || echo '__NOT_FOUND__'
-    umount /mnt/saunafs-test
+FOUND=$(docker exec leilfs-operator-control-plane bash -c "
+    mkdir -p /mnt/leilfs-test
+    mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/leilfs-test 2>/dev/null || \
+        mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/leilfs-test
+    cat /mnt/leilfs-test/${TEST_FILE} 2>/dev/null || echo '__NOT_FOUND__'
+    umount /mnt/leilfs-test
 ")
 echo "    File content: '$FOUND'"
 [ "$FOUND" = "$TEST_CONTENT" ] || \

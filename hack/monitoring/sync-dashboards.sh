@@ -4,11 +4,11 @@
 set -euo pipefail
 
 NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
-NAME="${DASHBOARDS_CM_NAME:-saunafs-operator-dashboards}"
+NAME="${DASHBOARDS_CM_NAME:-leilfs-operator-dashboards}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASH_DIR="${SCRIPT_DIR}/dashboards"
 
-EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-saunafs-operator}"
+EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-leilfs-operator}"
 if ! kubectl config get-contexts -o name | grep -qx "${EXPECTED_CONTEXT}"; then
   echo "ERROR: kube context '${EXPECTED_CONTEXT}' not found." >&2
   exit 1
@@ -27,7 +27,7 @@ fi
   --dry-run=client -o yaml | \
   "${KCTL[@]}" label --local -f - --dry-run=client -o yaml \
     grafana_dashboard=1 \
-    app.kubernetes.io/part-of=saunafs-operator | \
+    app.kubernetes.io/part-of=leilfs-operator | \
   "${KCTL[@]}" apply -f -
 
 echo ">> Dashboards ConfigMap '${NAME}' applied in namespace '${NAMESPACE}'."

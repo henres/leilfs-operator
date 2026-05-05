@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- saunafs_v1alpha1_saunafscluster.yaml
+- leilfs_v1alpha1_leilfscluster.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

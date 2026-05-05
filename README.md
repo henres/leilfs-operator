@@ -1,10 +1,10 @@
-# saunafs-operator
-Open-source Kubernetes operator for deploying and managing SaunaFS clusters.
+# leilfs-operator
+Open-source Kubernetes operator for deploying and managing LeilFS clusters.
 
 ## Description
-This operator introduces the SaunaFSCluster CRD to configure master and chunk
+This operator introduces the LeilFSCluster CRD to configure master and chunk
 components and optionally deploy a CSI driver. It focuses on cluster
-configuration, scheduling, and resource controls to run SaunaFS on Kubernetes.
+configuration, scheduling, and resource controls to run LeilFS on Kubernetes.
 
 ## Getting Started
 
@@ -18,7 +18,7 @@ configuration, scheduling, and resource controls to run SaunaFS on Kubernetes.
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/saunafs-operator:tag
+make docker-build docker-push IMG=<some-registry>/leilfs-operator:tag
 ```
 
 **NOTE:** This image ought to be published in the personal registry you specified. 
@@ -34,7 +34,7 @@ make install
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
 ```sh
-make deploy IMG=<some-registry>/saunafs-operator:tag
+make deploy IMG=<some-registry>/leilfs-operator:tag
 ```
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin 
@@ -75,7 +75,7 @@ Following are the steps to build the installer and distribute this project to us
 1. Build the installer for the image built and published in the registry:
 
 ```sh
-make build-installer IMG=<some-registry>/saunafs-operator:tag
+make build-installer IMG=<some-registry>/leilfs-operator:tag
 ```
 
 NOTE: The makefile target mentioned above generates an 'install.yaml'
@@ -88,7 +88,7 @@ its dependencies.
 Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.:
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/saunafs-operator/<tag or branch>/dist/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/<org>/leilfs-operator/<tag or branch>/dist/install.yaml
 ```
 
 ## Contributing

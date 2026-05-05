@@ -1,10 +1,10 @@
-# Copilot Instructions — saunafs-operator
+# Copilot Instructions — leilfs-operator
 
-This is a Kubernetes operator written in Go (Kubebuilder) that manages SaunaFS clusters via a `SaunaFSCluster` CRD.
+This is a Kubernetes operator written in Go (Kubebuilder) that manages LeilFS clusters via a `LeilFSCluster` CRD.
 
 ## Project structure
 
-- `api/v1alpha1/` — CRD types (`SaunaFSClusterSpec`, sub-specs)
+- `api/v1alpha1/` — CRD types (`LeilFSClusterSpec`, sub-specs)
 - `internal/controller/` — reconciliation logic
 - `cmd/main.go` — operator entrypoint
 - `config/` — Kustomize manifests (CRDs, RBAC, manager)
@@ -18,7 +18,7 @@ This is a Kubernetes operator written in Go (Kubebuilder) that manages SaunaFS c
 - Code generation: `make generate && make manifests` after editing types
 - Tests: `make test` (envtest) — always run before committing
 - Linting: `make lint` (golangci-lint)
-- Kubernetes API groups: `saunafs.saunafs-operator.io`
+- Kubernetes API groups: `leilfs.leilfs-operator.io`
 
 ## Coding rules
 
@@ -39,7 +39,7 @@ This is a Kubernetes operator written in Go (Kubebuilder) that manages SaunaFS c
 
 - Helm chart is in `chart/` — bump `chart/Chart.yaml` version on every release.
 - `make build-installer` produces `dist/install.yaml` for raw-kubectl installs.
-- The operator image is `ghcr.io/henres/saunafs-operator`.
+- The operator image is `ghcr.io/henres/leilfs-operator`.
 
 ## Roadmap
 

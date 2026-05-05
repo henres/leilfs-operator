@@ -1,4 +1,4 @@
-# SaunaFS Operator — Infrastructure Requirements
+# LeilFS Operator — Infrastructure Requirements
 
 > This operator is primarily designed for **homelab use**. The configurations below
 > reflect that reality: single-node and 2-node setups are documented and supported,
@@ -97,7 +97,7 @@ The `node_spread` replication goal (3 copies, one per node label) also requires 
 
 ## Node topology for the sample CR (3-node)
 
-The sample CR (`config/samples/saunafs_v1alpha1_saunafscluster.yaml`) targets this layout:
+The sample CR (`config/samples/leilfs_v1alpha1_leilfscluster.yaml`) targets this layout:
 
 ```
 node: worker1  →  chunkserver worker1-hdd001  (label=worker1)
@@ -203,7 +203,7 @@ deleted — this is intentional for metadata persistence.
 
 ## No 2-node support — summary
 
-SaunaFS does not document a minimum node count, but the combination of:
+LeilFS does not document a minimum node count, but the combination of:
 - `ec(4,2)` requiring 6 independent chunk servers
 - node-spread replication goals requiring N distinct node labels
 - HA master/shadow needing 2 distinct nodes for anti-affinity to be effective

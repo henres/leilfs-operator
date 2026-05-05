@@ -24,7 +24,7 @@ const (
 var (
 	ClusterInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_info",
+			Name: "leilfs_cluster_info",
 			Help: "Constant 1 gauge per LeilFSCluster, with version information as labels.",
 		},
 		[]string{"namespace", "cluster", "version"},
@@ -32,7 +32,7 @@ var (
 
 	ClusterPhase = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_phase",
+			Name: "leilfs_cluster_phase",
 			Help: "Current phase of the LeilFSCluster (1 for the active phase, 0 otherwise).",
 		},
 		[]string{"namespace", "cluster", "phase"},
@@ -40,7 +40,7 @@ var (
 
 	MasterReplicasDesired = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_master_replicas_desired",
+			Name: "leilfs_cluster_master_replicas_desired",
 			Help: "Desired number of master replicas (1 for single, 2+ for HA).",
 		},
 		[]string{"namespace", "cluster"},
@@ -48,7 +48,7 @@ var (
 
 	MasterReplicasReady = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_master_replicas_ready",
+			Name: "leilfs_cluster_master_replicas_ready",
 			Help: "Number of master replicas currently Ready (active + shadows).",
 		},
 		[]string{"namespace", "cluster"},
@@ -56,7 +56,7 @@ var (
 
 	ShadowReplicasReady = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_shadow_replicas_ready",
+			Name: "leilfs_cluster_shadow_replicas_ready",
 			Help: "Number of shadow master replicas currently Ready.",
 		},
 		[]string{"namespace", "cluster"},
@@ -64,7 +64,7 @@ var (
 
 	ChunkServersDesired = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_chunkservers_desired",
+			Name: "leilfs_cluster_chunkservers_desired",
 			Help: "Desired number of chunkserver StatefulSets, partitioned by source (manual or autodiscover).",
 		},
 		[]string{"namespace", "cluster", "source"},
@@ -72,7 +72,7 @@ var (
 
 	ChunkServersReady = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_chunkservers_ready",
+			Name: "leilfs_cluster_chunkservers_ready",
 			Help: "Number of chunkserver StatefulSets whose desired replicas are all Ready.",
 		},
 		[]string{"namespace", "cluster"},
@@ -80,7 +80,7 @@ var (
 
 	MetaloggersReady = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_metaloggers_ready",
+			Name: "leilfs_cluster_metaloggers_ready",
 			Help: "Number of metalogger replicas currently Ready.",
 		},
 		[]string{"namespace", "cluster"},
@@ -88,7 +88,7 @@ var (
 
 	AutoDiscoverPVsMatched = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "saunafs_cluster_autodiscover_pvs_matched",
+			Name: "leilfs_cluster_autodiscover_pvs_matched",
 			Help: "Number of PersistentVolumes currently matching the autoDiscover selector for this cluster.",
 		},
 		[]string{"namespace", "cluster"},
@@ -96,7 +96,7 @@ var (
 
 	ReconcileErrorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "saunafs_cluster_reconcile_errors_total",
+			Name: "leilfs_cluster_reconcile_errors_total",
 			Help: "Total number of reconcile errors observed for this cluster.",
 		},
 		[]string{"namespace", "cluster"},

@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Safety guard: this stack is meant for the local Kind cluster.
 # Override with KUBE_CONTEXT_OVERRIDE=1 if you really know what you're doing.
-EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-saunafs-operator}"
+EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-leilfs-operator}"
 # Verify the expected context exists; if so, use it directly without
 # requiring the user to switch their global current-context.
 if ! kubectl config get-contexts -o name | grep -qx "${EXPECTED_CONTEXT}"; then
@@ -38,7 +38,7 @@ helm repo update prometheus-community >/dev/null
   --values "${SCRIPT_DIR}/values.yaml" \
   --wait --timeout 5m
 
-echo ">> Applying ServiceMonitor for saunafs-operator"
+echo ">> Applying ServiceMonitor for leilfs-operator"
 "${KCTL[@]}" apply -f "${SCRIPT_DIR}/servicemonitor.yaml"
 
 echo ">> Applying dashboards ConfigMap"

@@ -175,6 +175,24 @@ func sidecarDefaultResources() corev1.ResourceRequirements {
 	}
 }
 
+// exporterDefaultResources returns defaults for the leilfs-exporter
+// sidecar. The work is bursty (one fork per saunafs-admin subcommand at
+// each scrape, ~9 commands per scrape, scrape interval typically 30s),
+// so requests stay tiny but limits leave headroom for the parsing and
+// the JSON-encoded HTTP response.
+func exporterDefaultResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10m"),
+			corev1.ResourceMemory: resource.MustParse("32Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+	}
+}
+
 // masterPodAntiAffinity returns a preferred anti-affinity rule that spreads
 // master StatefulSet pods across different nodes.  Using "preferred" rather
 // than "required" avoids unschedulable pods on single-node dev clusters while
@@ -1924,6 +1942,11 @@ func (r *LeilFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Context
 				{Name: "admin", Port: 9419, Protocol: corev1.ProtocolTCP},
 				{Name: "cs", Port: 9420, Protocol: corev1.ProtocolTCP},
 				{Name: "client", Port: 9421, Protocol: corev1.ProtocolTCP},
+				// Exposed by the optional leilfs-exporter sidecar.
+				// Always declared so PodMonitors can target it
+				// uniformly even when the sidecar is disabled
+				// (the port simply has no listener in that case).
+				{Name: "metrics", Port: 9418, Protocol: corev1.ProtocolTCP},
 			},
 		},
 	}
@@ -2226,6 +2249,64 @@ done
 			Command:         []string{"sh", "-c", sidecarCmd},
 			Env:             []corev1.EnvVar{podNameEnv},
 			Resources:       sidecarDefaultResources(),
+		})
+	}
+
+	// Optional leilfs-exporter sidecar. Enabled by default on every
+	// master Pod (one per replica); set `master.exporter.enabled: false`
+	// to opt out. Only the active master returns useful series — the
+	// shadow rejects most admin queries and reports an empty metadata
+	// view. Filtering is delegated to the PodMonitor via the
+	// `leilfs.io/active-master=true` label, so we keep the same PodSpec
+	// on every replica and let Prometheus drop scrapes whose target
+	// lacks that label.
+	exp := cluster.Spec.Master.Exporter
+	exporterEnabled := true
+	if exp != nil && exp.Enabled != nil {
+		exporterEnabled = *exp.Enabled
+	}
+	if exporterEnabled {
+		expImage := ""
+		if exp != nil {
+			expImage = exp.Image
+		}
+		if expImage == "" {
+			expImage = "ghcr.io/henres/leilfs-operator/leilfs-exporter:dev"
+		}
+		expArgs := []string{
+			"--listen-address=:9418",
+			"--master-host=127.0.0.1",
+			"--master-port=9421",
+		}
+		if exp != nil && exp.ScrapeTimeout != nil && exp.ScrapeTimeout.Duration > 0 {
+			expArgs = append(expArgs, fmt.Sprintf("--scrape-timeout=%s", exp.ScrapeTimeout.Duration))
+		}
+		var expResources corev1.ResourceRequirements
+		if exp != nil {
+			expResources = exp.Resources
+		}
+		if expResources.Requests == nil && expResources.Limits == nil {
+			expResources = exporterDefaultResources()
+		}
+		sidecarContainers = append(sidecarContainers, corev1.Container{
+			Name:            "leilfs-exporter",
+			Image:           expImage,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Args:            expArgs,
+			Ports: []corev1.ContainerPort{
+				{Name: "metrics", ContainerPort: 9418, Protocol: corev1.ProtocolTCP},
+			},
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/healthz",
+						Port: intstr.FromInt(9418),
+					},
+				},
+				InitialDelaySeconds: 5,
+				PeriodSeconds:       10,
+			},
+			Resources: expResources,
 		})
 	}
 

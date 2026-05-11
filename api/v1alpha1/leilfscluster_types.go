@@ -195,6 +195,36 @@ type MasterSpec struct {
 	// Defaults to 30s. Increase for large filesystems with many inodes.
 	// +optional
 	StartupGracePeriod *metav1.Duration `json:"startupGracePeriod,omitempty"`
+	// Exporter configures the optional leilfs-exporter sidecar that
+	// publishes filesystem-level Prometheus metrics (`leilfs_fs_*`) by
+	// shelling out to `saunafs-admin` against the local sfsmaster.
+	// +optional
+	Exporter *ExporterSpec `json:"exporter,omitempty"`
+}
+
+// ExporterSpec configures the leilfs-exporter sidecar that runs in
+// every master Pod and exposes filesystem-level Prometheus metrics on
+// :9418/metrics. Useful series are emitted only by the active master
+// (the shadow's metadata view is restricted), so the ServiceMonitor
+// shipped under hack/monitoring/ filters scrape targets via the
+// `leilfs.io/active-master=true` label set by the operator.
+type ExporterSpec struct {
+	// Enabled toggles the sidecar. Defaults to true when the field is
+	// present; omit the entire `exporter` block to disable.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+	// Image overrides the default leilfs-exporter container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+	// ScrapeTimeout caps the wall-time of every saunafs-admin
+	// invocation issued by the exporter. Defaults to 3s.
+	// +optional
+	ScrapeTimeout *metav1.Duration `json:"scrapeTimeout,omitempty"`
+	// Resources for the exporter container. Defaults are very small
+	// (10m CPU, 32Mi RAM) since the work is bursty exec.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // ShadowSpec configures the shadow master StatefulSet.

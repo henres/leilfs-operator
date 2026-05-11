@@ -1,7 +1,8 @@
 
 # Image URLs for building/pushing
-IMG             ?= ghcr.io/henres/leilfs-operator/saunafs-operator:latest
+IMG             ?= ghcr.io/henres/leilfs-operator/leilfs-operator:latest
 NFS_GANESHA_IMG ?= ghcr.io/henres/leilfs-operator/nfs-ganesha:latest
+EXPORTER_IMG    ?= ghcr.io/henres/leilfs-operator/leilfs-exporter:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.29.0
 
@@ -131,6 +132,14 @@ docker-build-nfs-ganesha: ## Build the NFS-Ganesha image via docker compose.
 docker-push-nfs-ganesha: ## Push the NFS-Ganesha image via docker compose.
 	docker compose -f docker/docker-compose.yml push nfs-ganesha
 
+.PHONY: docker-build-exporter
+docker-build-exporter: ## Build the leilfs-exporter image.
+	$(CONTAINER_TOOL) build -t ${EXPORTER_IMG} -f docker/exporter.Dockerfile .
+
+.PHONY: docker-push-exporter
+docker-push-exporter: ## Push the leilfs-exporter image.
+	$(CONTAINER_TOOL) push ${EXPORTER_IMG}
+
 .PHONY: docker-build-all
 docker-build-all: ## Build both operator and NFS-Ganesha images via docker compose.
 	OPERATOR_IMAGE_TAG=$(shell echo ${IMG} | sed 's/.*://') \
@@ -184,11 +193,11 @@ monitoring-dashboards: ## Re-sync hack/monitoring/dashboards/*.json into the Gra
 
 .PHONY: monitoring-prometheus
 monitoring-prometheus: ## Port-forward Prometheus on http://localhost:9090.
-	kubectl --context kind-saunafs-operator -n monitoring port-forward svc/kube-prom-stack-kube-prome-prometheus 9090:9090
+	kubectl --context sfs-lima -n monitoring port-forward svc/kube-prom-stack-kube-prome-prometheus 9090:9090
 
 .PHONY: monitoring-grafana
 monitoring-grafana: ## Port-forward Grafana on http://localhost:3000 (admin/admin).
-	kubectl --context kind-saunafs-operator -n monitoring port-forward svc/kube-prom-stack-grafana 3000:80
+	kubectl --context sfs-lima -n monitoring port-forward svc/kube-prom-stack-grafana 3000:80
 
 ##@ Kind
 
@@ -260,8 +269,8 @@ kind-load-nfs-ganesha: nfs-ganesha-build ## Build and load the NFS-Ganesha image
 kind-test: kind-create kind-deploy ## Create Kind cluster and deploy the operator end-to-end.
 
 .PHONY: kind-sample
-kind-sample: ## Apply the SaunaFSCluster sample CR to the Kind cluster.
-	$(KIND_KUBECTL) apply -f config/samples/saunafs_v1alpha1_saunafscluster.yaml
+kind-sample: ## Apply the LeilFSCluster sample CR to the Kind cluster.
+	$(KIND_KUBECTL) apply -f config/samples/leilfs_v1alpha1_leilfscluster.yaml
 
 .PHONY: kind-reset
 kind-reset: ## FULL RESET: delete cluster+data, rebuild operator image and redeploy.
@@ -288,9 +297,9 @@ kind-reset: ## FULL RESET: delete cluster+data, rebuild operator image and redep
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
 	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) apply -f -
 	@echo "==> Waiting for controller to be ready..."
-	$(KIND_KUBECTL) rollout status deployment/saunafs-operator-controller-manager \
-	    -n saunafs-operator-system --timeout=120s
-	@echo "==> Deploying sample SaunaFSCluster CR..."
+	$(KIND_KUBECTL) rollout status deployment/leilfs-operator-controller-manager \
+	    -n leilfs-operator-system --timeout=120s
+	@echo "==> Deploying sample LeilFSCluster CR..."
 	$(MAKE) kind-sample
 	@echo "==> Done. Cluster ready."
 
@@ -312,9 +321,9 @@ kind-build-and-deployment: ## Build operator image and deploy to an existing Kin
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(KIND_IMG)
 	$(KUSTOMIZE) build config/default | $(KIND_KUBECTL) apply -f -
 	@echo "==> Waiting for controller to be ready..."
-	$(KIND_KUBECTL) rollout status deployment/saunafs-operator-controller-manager \
-	    -n saunafs-operator-system --timeout=120s
-	@echo "==> Deploying sample SaunaFSCluster CR..."
+	$(KIND_KUBECTL) rollout status deployment/leilfs-operator-controller-manager \
+	    -n leilfs-operator-system --timeout=120s
+	@echo "==> Deploying sample LeilFSCluster CR..."
 	$(MAKE) kind-sample
 	@echo "==> Deployment Done. App ready."
 
@@ -363,11 +372,11 @@ ENVTEST_VERSION ?= latest
 GOLANGCI_LINT_VERSION ?= v1.54.2
 
 ## Kind
-KIND_CLUSTER_NAME      ?= saunafs-operator
+KIND_CLUSTER_NAME      ?= leilfs-operator
 KIND_CONFIG            ?= scripts/kind-config.yaml
 KIND_IMG               ?= $(IMG)
 # Root directory on the real host that is bind-mounted into Kind nodes as /mnt/hdd00X
-KIND_DATA_DIR          ?= /tmp/saunafs-kind
+KIND_DATA_DIR          ?= /tmp/leilfs-lima
 # kube-rbac-proxy: gcr.io/kubebuilder is defunct; use the upstream quay.io registry
 KUBE_RBAC_PROXY_IMG   ?= quay.io/brancz/kube-rbac-proxy:v0.18.0
 
@@ -382,7 +391,7 @@ GHCR_PAT           ?=
 GHCR_USER          ?= henres
 PULL_SECRET_NAME   ?= ghcr-pull-secret
 # Namespaces that need the pull secret (operator system + workload namespace)
-PULL_SECRET_NAMESPACES ?= default saunafs-operator-system
+PULL_SECRET_NAMESPACES ?= default leilfs-operator-system
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

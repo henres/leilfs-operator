@@ -99,30 +99,54 @@ The metrics currently exposed (`leilfs_cluster_*`) are
 master, shadow lag), reconcile timings and errors. They describe how
 the operator manages the cluster, not the filesystem itself.
 
-### Backlog: filesystem-level metrics exporter
+### Filesystem-level metrics exporter
 
 The rich filesystem statistics shown in the upstream CGI UI
-(`/etc/cgi`, port 9425) — total/used chunks, endangered/missing
-chunks, replication queue depth, per-chunkserver used/total bytes,
-master metadata version, op/s, goal status — are **not** scraped into
-Prometheus today.
+(`/etc/cgi`, port 9425) — total/used chunks, endangered/lost chunks,
+replication and deletion queue depth, per-chunkserver used/total
+bytes, master metadata version, per-disk capacity, goals, mounts —
+are scraped into Prometheus by the **leilfs-exporter** sidecar.
 
-Planned approach:
-
-- Build a small Prometheus exporter that talks to `sfsmaster` over
-  its admin port (9419) using the upstream protocol. Reuse
-  `saunafs-admin` JSON output where possible to avoid re-implementing
-  the binary protocol.
-- Re-publish the values as `leilfs_fs_*` metrics with stable labels
-  (`cluster`, `chunkserver`, `goal`, …).
-- Deploy either as a sidecar on the active master Pod (so failover
-  follows the master Lease holder automatically) or as a standalone
-  Deployment that targets the master `Service`. Sidecar is simpler
-  for observability of the active master, standalone is simpler for
-  RBAC and lifecycle.
-- Ship a Grafana dashboard mirroring the CGI UI views (cluster
-  health, chunk distribution, per-chunkserver breakdown, goal
-  status), alongside the existing `leilfs-operator-overview.json`.
+- **Where it runs**: one sidecar per master Pod, injected by the
+  operator into the master StatefulSet (`reconcileMasterStatefulSet`,
+  `internal/controller/leilfscluster_controller.go`). Enabled by
+  default; opt out via `spec.master.exporter.enabled: false`.
+- **How it queries the master**: shells out to `saunafs-admin
+  <subcommand> --porcelain` (9 subcommands: info, list-chunkservers,
+  list-metadataservers, metadataserver-status, chunks-health,
+  list-disks, list-goals, list-mounts, ready-chunkservers-count) at
+  scrape time, with a per-subcommand timeout (`--scrape-timeout`,
+  default 3s). Implementation lives in `internal/exporter/`
+  (`parser.go`, `collector.go`, `cmd/exporter/main.go`).
+- **Image**: `ghcr.io/henres/leilfs-operator/leilfs-exporter:<tag>`.
+  Built from `docker/exporter.Dockerfile` on top of
+  `leilfs-client:5.9.0` so `saunafs-admin` is in PATH. Overridable
+  via `spec.master.exporter.image`.
+- **Endpoint**: `:9418/metrics` on every master Pod. The headless
+  master Service exposes the same port for completeness.
+- **Active-only filtering**: only the active master returns useful
+  series; the shadow rejects most admin queries. Filtering is done
+  at scrape time via the PodMonitor in
+  `hack/monitoring/podmonitor-exporter.yaml`, which selects Pods
+  carrying the label `leilfs.io/active-master=true` (maintained by
+  the operator on every Lease transition).
+- **Metric namespace**: `leilfs_fs_*` (e.g. `leilfs_fs_chunks_safe`,
+  `leilfs_fs_chunks_endangered`, `leilfs_fs_chunkserver_used_bytes`,
+  `leilfs_fs_metadataserver_metadata_version`,
+  `leilfs_fs_mounts_total`). The exporter also exposes scrape-level
+  series: `leilfs_fs_up`, `leilfs_fs_scrape_errors_total`,
+  `leilfs_fs_scrape_duration_seconds` (both labelled by
+  `subcommand`).
+- **Dashboard**: `hack/monitoring/dashboards/leilfs-filesystem.json`
+  mirrors the CGI UI views (cluster overview, chunks health,
+  per-chunkserver capacity, metadata servers, disks, goals,
+  mounts, exporter diagnostics).
+- **Caveats**: porcelain output is not versioned by upstream; the
+  parser pins column counts and order. When SaunaFS bumps a
+  subcommand's output, update `internal/exporter/parser.go` and its
+  fixtures in `parser_test.go`. The exporter does not implement the
+  binary admin protocol on port 9419 — it strictly delegates to
+  `saunafs-admin`.
 
 ## Skills
 

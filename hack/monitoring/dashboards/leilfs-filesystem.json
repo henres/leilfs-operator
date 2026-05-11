@@ -1,0 +1,647 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Filesystem-level view of LeilFS clusters, mirroring the upstream SaunaFS CGI UI (port 9425). Scraped from the leilfs-exporter sidecar running in each master Pod; only the active master returns useful series (selected via the leilfs.io/active-master=true Pod label).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "liveNow": false,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "Cluster overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Scrape health of the leilfs-exporter sidecar on the active master (1 = healthy).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "text": "DOWN", "color": "red" } }, "type": "value" },
+            { "options": { "1": { "text": "UP", "color": "green" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "targets": [
+        { "expr": "max(leilfs_fs_up{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Exporter",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Metadata version of the master server.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "max(leilfs_fs_metadataserver_metadata_version{namespace=~\"$namespace\", cluster=~\"$cluster\", personality=\"master\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Metadata version",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total filesystem objects (kind=all) tracked by the master.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "max(leilfs_fs_objects_total{namespace=~\"$namespace\", cluster=~\"$cluster\", kind=\"all\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "FS objects",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Number of distinct chunkservers reported by the master.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "count(leilfs_fs_chunkserver_info{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Chunkservers",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Number of chunkservers currently ready to be written to.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "max(leilfs_fs_chunkservers_ready{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "CS ready",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Active client sessions (mounts) reported by the master.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "max(leilfs_fs_mounts_total{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Mounts",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 200,
+      "panels": [],
+      "title": "Chunks health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Safe (fully replicated) chunks per goal.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "sum by (goal) (leilfs_fs_chunks_safe{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "legendFormat": "{{goal}}", "refId": "A" }
+      ],
+      "title": "Safe chunks per goal",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Endangered (under-replicated) chunks across all goals. Non-zero means the cluster has lost redundancy on some chunks; should drop back to 0 once replication catches up.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 100 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 6 },
+      "id": 8,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "sum(leilfs_fs_chunks_endangered{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Endangered chunks",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Lost chunks (no copy left anywhere). Non-zero indicates data loss; should always be 0.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 6 },
+      "id": 9,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "sum(leilfs_fs_chunks_lost{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Lost chunks",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Replication queue depth: number of chunks pending replication, summed across all goals.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "sum(leilfs_fs_chunks_pending_replication{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Pending replication",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Deletion queue depth: number of chunks pending deletion, summed across all goals.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "sum(leilfs_fs_chunks_pending_deletion{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "instant": true, "refId": "A" }
+      ],
+      "title": "Pending deletion",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total chunks tracked by the master and total chunk copies.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "max(leilfs_fs_chunks_total{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "legendFormat": "chunks", "refId": "A" },
+        { "expr": "max(leilfs_fs_chunk_copies_total{namespace=~\"$namespace\", cluster=~\"$cluster\"})", "legendFormat": "copies", "refId": "B" }
+      ],
+      "title": "Chunks and copies (cluster-wide)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "id": 300,
+      "panels": [],
+      "title": "Chunkservers",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-chunkserver used vs total bytes.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_chunkserver_used_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "used {{address}}", "refId": "A" },
+        { "expr": "leilfs_fs_chunkserver_total_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "total {{address}}", "refId": "B" }
+      ],
+      "title": "Capacity per chunkserver",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Used ratio per chunkserver (used / total).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_chunkserver_used_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"} / leilfs_fs_chunkserver_total_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "{{address}}", "refId": "A" }
+      ],
+      "title": "Used ratio per chunkserver",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-chunkserver chunk count.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_chunkserver_chunks{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "{{address}}", "refId": "A" }
+      ],
+      "title": "Chunks per chunkserver",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Cumulative error rate reported by each chunkserver.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "rate(leilfs_fs_chunkserver_errors_total{namespace=~\"$namespace\", cluster=~\"$cluster\"}[5m])", "legendFormat": "{{address}}", "refId": "A" }
+      ],
+      "title": "Chunkserver error rate (1/s)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "id": 400,
+      "panels": [],
+      "title": "Metadata servers",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-metadata-server health (1 = master running OR shadow connected).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "custom": { "displayMode": "color-background" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 17,
+      "options": { "showHeader": true },
+      "targets": [
+        { "expr": "leilfs_fs_metadataserver_status{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "Metadata servers",
+      "type": "table",
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "container": true, "service": true } } }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Metadata version reported by each metadata server. A growing gap between master and shadow indicates replication lag.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 18,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_metadataserver_metadata_version{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "{{ip}} ({{personality}})", "refId": "A" }
+      ],
+      "title": "Metadata version per server",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
+      "id": 500,
+      "panels": [],
+      "title": "Disks",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-disk capacity (used + total) across all chunkservers.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
+      "id": 19,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_disk_used_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "used {{chunkserver}} {{path}}", "refId": "A" },
+        { "expr": "leilfs_fs_disk_total_bytes{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "total {{chunkserver}} {{path}}", "refId": "B" }
+      ],
+      "title": "Disk capacity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-disk chunk count.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+      "id": 20,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "leilfs_fs_disk_chunks{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "{{chunkserver}} {{path}}", "refId": "A" }
+      ],
+      "title": "Chunks per disk",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Disks currently flagged as damaged, to_delete, or scanning.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 57 },
+      "id": 21,
+      "options": { "showHeader": true },
+      "targets": [
+        { "expr": "leilfs_fs_disk_flag{namespace=~\"$namespace\", cluster=~\"$cluster\"} > 0", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "Disks with active flags",
+      "type": "table",
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "container": true, "service": true } } }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 65 },
+      "id": 600,
+      "panels": [],
+      "title": "Goals & mounts",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Goal definitions reported by the master, with their slot id, name, and replication scheme (e.g. ec_4_2 or _ _ _).",
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 66 },
+      "id": 22,
+      "options": { "showHeader": true },
+      "targets": [
+        { "expr": "leilfs_fs_goal_info{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "Goals",
+      "type": "table",
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "container": true, "service": true, "Value": true } } }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Active client mounts (sessions) with their source IP, version, path and access flags.",
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 66 },
+      "id": 23,
+      "options": { "showHeader": true },
+      "targets": [
+        { "expr": "leilfs_fs_mount_info{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "Mounts",
+      "type": "table",
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "container": true, "service": true, "Value": true } } }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 74 },
+      "id": 700,
+      "panels": [],
+      "title": "Exporter diagnostics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Wall-time duration of the last scrape per saunafs-admin subcommand. Spikes here indicate slow admin queries; the exporter caps each at --scrape-timeout (default 3s).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 75 },
+      "id": 24,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last", "max"] } },
+      "targets": [
+        { "expr": "leilfs_fs_scrape_duration_seconds{namespace=~\"$namespace\", cluster=~\"$cluster\"}", "legendFormat": "{{subcommand}}", "refId": "A" }
+      ],
+      "title": "Scrape duration by subcommand",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Cumulative count of saunafs-admin subcommands that returned an error.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 75 },
+      "id": 25,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
+      "targets": [
+        { "expr": "rate(leilfs_fs_scrape_errors_total{namespace=~\"$namespace\", cluster=~\"$cluster\"}[5m])", "legendFormat": "{{subcommand}}", "refId": "A" }
+      ],
+      "title": "Scrape errors rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["leilfs", "filesystem"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(leilfs_fs_up, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
+        "options": [],
+        "query": { "query": "label_values(leilfs_fs_up, namespace)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(leilfs_fs_up{namespace=~\"$namespace\"}, cluster)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Cluster",
+        "multi": true,
+        "name": "cluster",
+        "options": [],
+        "query": { "query": "label_values(leilfs_fs_up{namespace=~\"$namespace\"}, cluster)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "LeilFS — Filesystem",
+  "uid": "leilfs-filesystem",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,44 @@
+# Scrape the leilfs-exporter sidecar that runs in every master Pod.
+#
+# We use a PodMonitor (not a ServiceMonitor) because the active master
+# is identified by the Pod-level label `leilfs.io/active-master=true`,
+# which the operator updates on every Lease transition. A
+# ServiceMonitor would aggregate active + shadow endpoints behind the
+# same Service IP, which is not what we want — only the active master
+# returns useful data; the shadow rejects most admin queries.
+#
+# The label `release: kube-prom-stack` is the default
+# podMonitorSelector applied by the kube-prometheus-stack Helm chart,
+# so Prometheus picks this object up automatically.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: leilfs-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: leilfs-operator
+    release: kube-prom-stack
+spec:
+  # Watch every namespace; clusters live in user namespaces, not in
+  # leilfs-operator-system.
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: leilfs-master
+      leilfs.io/active-master: "true"
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scheme: http
+      # Surface the cluster name (instance label) and pod index so
+      # series can be sliced per cluster in dashboards.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          targetLabel: cluster
+        - sourceLabels: [__meta_kubernetes_pod_label_apps_kubernetes_io_pod_index]
+          targetLabel: pod_index
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace

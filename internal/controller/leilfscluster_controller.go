@@ -2130,10 +2130,13 @@ delete_self() {
 
 echo "[ha-sidecar] starting, pod=${MY_POD}, startup_grace=${STARTUP_GRACE}s"
 
-# Wait for sfsmaster to load metadata before we start health-checking it.
-# This covers large filesystems where metadata load takes tens of seconds.
-sleep ${STARTUP_GRACE}
-echo "[ha-sidecar] startup grace period elapsed, entering main loop"
+# Record start time. The startup grace period suppresses the sfsmaster
+# health check (pgrep) for STARTUP_GRACE seconds — the master can take
+# tens of seconds to load metadata on large filesystems. The Lease
+# renewal loop still runs from t=0; otherwise the Lease would expire
+# (leaseDurationSeconds=30) before the grace period ends and a shadow
+# would steal it, causing a flapping election.
+START_EPOCH=$(date -u +%%s)
 
 while true; do
   LEASE=$(get_lease)
@@ -2148,7 +2151,12 @@ while true; do
 
   if [ "${HOLDER}" = "${MY_POD}" ]; then
     # ── I am the holder: check sfsmaster is alive, then renew ───────────────
-    if ! pgrep -x sfsmaster > /dev/null 2>&1; then
+    NOW_EPOCH=$(date -u +%%s)
+    IN_GRACE=0
+    if [ $((NOW_EPOCH - START_EPOCH)) -lt ${STARTUP_GRACE} ]; then
+      IN_GRACE=1
+    fi
+    if [ ${IN_GRACE} -eq 0 ] && ! pgrep -x sfsmaster > /dev/null 2>&1; then
       echo "[ha-sidecar] sfsmaster not running, releasing Lease so a shadow can take over"
       # Release: PATCH holderIdentity to empty so shadows see an expired lease
       NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)

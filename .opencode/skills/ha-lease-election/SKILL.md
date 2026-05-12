@@ -114,6 +114,19 @@ The operator does NOT write to the Lease after creation; election is fully peer-
 
 ## Key pitfalls
 
+- **Startup grace must NOT block the Lease renewal**: the sidecar accepts a
+  `STARTUP_GRACE` (default 90s) to tolerate slow metadata loading by
+  sfsmaster. Its only legitimate effect is to suppress the `pgrep
+  sfsmaster` health check during that window. **The renewal loop must
+  start at t=0.** A previous version did `sleep ${STARTUP_GRACE}` before
+  the loop; with `leaseDurationSeconds=30` the active master's Lease
+  expired 60s into every pod start, the shadow stole it via CAS, both
+  pods then `delete_self()` and entered their own grace, and the cluster
+  flapped continuously between master-0 and master-1 every ~60–120s.
+  Chunkservers kept reconnecting to a moving target and only 1–4 of N
+  were visible to the exporter at any time. Implementation today tracks
+  `START_EPOCH` and skips the `pgrep` check for `STARTUP_GRACE` seconds
+  while still issuing PATCH every `RENEW_INTERVAL`.
 - **sed pattern must handle space after `:`**: Kubernetes API returns `"holderIdentity": "value"` (space), not `"holderIdentity":"value"`.
 - **managedFields false-positive**: the `f:holderIdentity` entry in `managedFields` has no quoted value and is safely ignored by the sed pattern, but `grep -v '^$' | head -1` is still needed.
 - **wget only**: the saunafs-master image has `wget` v1.21.4 but NOT `curl` or `kubectl`. All API calls use `wget --method=PATCH/DELETE`.

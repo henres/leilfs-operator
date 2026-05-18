@@ -1026,7 +1026,12 @@ func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.
 		}
 
 		// Build a synthetic ChunkServerSpec and reconcile it like a manual one.
-		mountPath := fmt.Sprintf("/mnt/%s", pv.Name)
+		// The mount path MUST match the /mnt/hdd* glob that the chunkserver
+		// start script (leilfs-chunkserver.start.sh) uses to auto-detect data
+		// directories — otherwise sfshdd.cfg ends up empty and the chunkserver
+		// reports 0B of storage. Each auto-discovered chunkserver owns exactly
+		// one disk, so /mnt/hdd0 is sufficient.
+		mountPath := "/mnt/hdd0"
 		srv := &saunafsv1alpha1.ChunkServerSpec{
 			Name:     srvName,
 			NodeName: nodeName,

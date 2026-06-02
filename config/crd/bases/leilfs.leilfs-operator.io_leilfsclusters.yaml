@@ -246,8 +246,9 @@ spec:
                                 x-kubernetes-int-or-string: true
                               storageClassName:
                                 description: |-
-                                  StorageClassName and Size are used to dynamically provision a PVC if
-                                  neither HostPath nor ClaimName is set.
+                                  StorageClassName and Size are reserved for future dynamic PVC provisioning.
+                                  The current controller rejects mountPaths without HostPath or ClaimName to
+                                  avoid silently using ephemeral emptyDir storage.
                                 type: string
                             required:
                             - path
@@ -364,7 +365,10 @@ spec:
                     type: array
                 type: object
               csi:
-                description: CSI controls the optional CSI driver deployment.
+                description: |-
+                  CSI is reserved for a future CSI driver deployment. Setting csi.enabled=true
+                  is rejected by the current controller so unsupported storage features do not
+                  appear to be active.
                 properties:
                   controllerReplicas:
                     format: int32
@@ -718,8 +722,8 @@ spec:
                       enabled:
                         default: true
                         description: |-
-                          Enabled toggles the sidecar. Defaults to true when the field is
-                          present; omit the entire `exporter` block to disable.
+                          Enabled toggles the sidecar. Defaults to true even when the entire
+                          `exporter` block is omitted; set enabled=false to opt out.
                         type: boolean
                       image:
                         description: Image overrides the default leilfs-exporter container
@@ -1222,13 +1226,16 @@ spec:
                   shadow — preventing split-brain.
                 properties:
                   image:
-                    description: Image overrides the container image (defaults to
-                      the same image as Master).
+                    description: |-
+                      Image must match spec.master.image. Master and shadow pods share one
+                      StatefulSet PodTemplate, so per-shadow images are not supported yet.
                     type: string
                   metadataStorage:
                     description: |-
-                      MetadataStorage configures the PVC template used by each shadow replica
-                      to persist its local copy of the metadata. Each replica gets its own PVC.
+                      MetadataStorage configures fallback defaults for the shared master-data
+                      VolumeClaimTemplate when spec.master.metadataStorage is omitted. Master and
+                      shadow pods share one StatefulSet template, so this is not per-shadow
+                      storage configuration.
                     properties:
                       size:
                         anyOf:
@@ -1249,7 +1256,10 @@ spec:
                   nodeSelector:
                     additionalProperties:
                       type: string
-                    description: NodeSelector for shadow pods.
+                    description: |-
+                      NodeSelector is reserved for future per-shadow scheduling. It is rejected
+                      by the current controller because all master/shadow pods share one
+                      StatefulSet PodTemplate.
                     type: object
                   replicas:
                     default: 1
@@ -1259,7 +1269,10 @@ spec:
                     minimum: 1
                     type: integer
                   resources:
-                    description: Resources for the shadow container.
+                    description: |-
+                      Resources is reserved for future per-shadow sizing. It is rejected by the
+                      current controller because all master/shadow pods share one StatefulSet
+                      PodTemplate.
                     properties:
                       claims:
                         description: |-
@@ -1314,7 +1327,10 @@ spec:
                         type: object
                     type: object
                   tolerations:
-                    description: Tolerations for shadow pods.
+                    description: |-
+                      Tolerations is reserved for future per-shadow scheduling. It is rejected by
+                      the current controller because all master/shadow pods share one StatefulSet
+                      PodTemplate.
                     items:
                       description: |-
                         The pod this Toleration is attached to tolerates any taint that matches

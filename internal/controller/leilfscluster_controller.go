@@ -55,6 +55,8 @@ const (
 	// matches this label so traffic always reaches the active pod.
 	labelActiveMaster = "leilfs.io/active-master"
 
+	defaultMasterImage = "ghcr.io/henres/leilfs-container/leilfs-master:5.9.0"
+
 	// leaseDuration is how long a pod's Lease is valid without renewal.
 	// When the holder dies or is isolated, after this period a shadow can
 	// take over.  Keep it short enough for fast failover, long enough to
@@ -70,6 +72,73 @@ const (
 	// that is the sidecar's responsibility.
 	leaseObserveInterval = 5 * time.Second
 )
+
+type unsupportedSpecError struct {
+	problems []string
+}
+
+func (e *unsupportedSpecError) Error() string {
+	return "unsupported LeilFSCluster spec: " + strings.Join(e.problems, "; ")
+}
+
+func isUnsupportedSpecError(err error) bool {
+	for err != nil {
+		if _, ok := err.(*unsupportedSpecError); ok {
+			return true
+		}
+		unwrapper, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = unwrapper.Unwrap()
+	}
+	return false
+}
+
+func validateClusterSpec(cluster *saunafsv1alpha1.LeilFSCluster) error {
+	var problems []string
+
+	if cluster.Spec.CSI.Enabled != nil && *cluster.Spec.CSI.Enabled {
+		problems = append(problems, "spec.csi.enabled is not supported: the CSI driver is not implemented yet")
+	}
+
+	masterImage := cluster.Spec.Master.Image
+	if masterImage == "" {
+		masterImage = defaultMasterImage
+	}
+	if shadow := cluster.Spec.Shadow; shadow != nil {
+		if shadow.Image != "" && shadow.Image != masterImage {
+			problems = append(problems, "spec.shadow.image differs from spec.master.image but per-shadow images are not supported by the unified master StatefulSet")
+		}
+		if len(shadow.NodeSelector) > 0 {
+			problems = append(problems, "spec.shadow.nodeSelector is not supported: master and shadow pods share one StatefulSet PodTemplate")
+		}
+		if len(shadow.Tolerations) > 0 {
+			problems = append(problems, "spec.shadow.tolerations is not supported: master and shadow pods share one StatefulSet PodTemplate")
+		}
+		if len(shadow.Resources.Requests) > 0 || len(shadow.Resources.Limits) > 0 {
+			problems = append(problems, "spec.shadow.resources is not supported: master and shadow pods share one StatefulSet PodTemplate")
+		}
+	}
+
+	for i := range cluster.Spec.Chunk.Servers {
+		server := &cluster.Spec.Chunk.Servers[i]
+		for j := range server.MountPaths {
+			mp := server.MountPaths[j]
+			if mp.Path != "" && mp.HostPath == "" && mp.ClaimName == "" {
+				problems = append(problems, fmt.Sprintf(
+					"spec.chunk.servers[%d].mountPaths[%d]: dynamic PVC provisioning for chunk mountPaths is not implemented; set hostPath for local disks or claimName for an existing PVC",
+					i, j,
+				))
+			}
+		}
+	}
+
+	if len(problems) > 0 {
+		return &unsupportedSpecError{problems: problems}
+	}
+	return nil
+}
 
 // defaultResources returns r if any requests or limits are already set,
 // otherwise it returns the provided defaults.  This allows users to override
@@ -253,6 +322,7 @@ func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		name string
 		fn   func(context.Context, *saunafsv1alpha1.LeilFSCluster) error
 	}{
+		{"validate spec", func(_ context.Context, c *saunafsv1alpha1.LeilFSCluster) error { return validateClusterSpec(c) }},
 		{"goals configmap", r.reconcileGoalsConfigMap},
 		{"migrate legacy master objects", r.migrateMasterToStatefulSet},
 		{"master statefulset", r.reconcileMasterStatefulSet},
@@ -276,10 +346,14 @@ func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	cluster.Status.TotalChunkServers = r.countTotalChunkServers(ctx, cluster)
 
 	if reconcileErr != nil {
+		reason := saunafsv1alpha1.ReasonReconcileError
+		if isUnsupportedSpecError(reconcileErr) {
+			reason = saunafsv1alpha1.ReasonUnsupportedSpec
+		}
 		apimeta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 			Type:               saunafsv1alpha1.ConditionReady,
 			Status:             metav1.ConditionFalse,
-			Reason:             saunafsv1alpha1.ReasonReconcileError,
+			Reason:             reason,
 			Message:            reconcileErr.Error(),
 			ObservedGeneration: cluster.Generation,
 		})
@@ -1892,7 +1966,7 @@ func (r *LeilFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Context
 
 	image := cluster.Spec.Master.Image
 	if image == "" {
-		image = "ghcr.io/henres/leilfs-container/leilfs-master:5.9.0"
+		image = defaultMasterImage
 	}
 
 	// Total replicas: 1 primary + N shadows.

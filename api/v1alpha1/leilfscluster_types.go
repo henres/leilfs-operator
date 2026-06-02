@@ -48,7 +48,9 @@ type LeilFSClusterSpec struct {
 	// custom. The first entry flagged with Default=true is applied as the
 	// cluster-wide default goal via the master configuration.
 	Goals []GoalSpec `json:"goals,omitempty"`
-	// CSI controls the optional CSI driver deployment.
+	// CSI is reserved for a future CSI driver deployment. Setting csi.enabled=true
+	// is rejected by the current controller so unsupported storage features do not
+	// appear to be active.
 	CSI CSISpec `json:"csi,omitempty"`
 	// WebUI controls the optional CGI web interface (leilfs-cgiserver).
 	WebUI WebUISpec `json:"interface,omitempty"`
@@ -73,6 +75,10 @@ const (
 	ReasonReconcileError = "ReconcileError"
 	// ReasonReady is used when all components have been reconciled without error.
 	ReasonReady = "Ready"
+	// ReasonUnsupportedSpec is used when the CR asks for an API feature that is
+	// declared for compatibility/future use but is not implemented by this
+	// controller yet.
+	ReasonUnsupportedSpec = "UnsupportedSpec"
 )
 
 // LeilFSClusterStatus defines the observed state of LeilFSCluster.
@@ -209,8 +215,8 @@ type MasterSpec struct {
 // shipped under hack/monitoring/ filters scrape targets via the
 // `leilfs.io/active-master=true` label set by the operator.
 type ExporterSpec struct {
-	// Enabled toggles the sidecar. Defaults to true when the field is
-	// present; omit the entire `exporter` block to disable.
+	// Enabled toggles the sidecar. Defaults to true even when the entire
+	// `exporter` block is omitted; set enabled=false to opt out.
 	// +kubebuilder:default=true
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
@@ -237,16 +243,25 @@ type ShadowSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
-	// Image overrides the container image (defaults to the same image as Master).
+	// Image must match spec.master.image. Master and shadow pods share one
+	// StatefulSet PodTemplate, so per-shadow images are not supported yet.
 	Image string `json:"image,omitempty"`
-	// MetadataStorage configures the PVC template used by each shadow replica
-	// to persist its local copy of the metadata. Each replica gets its own PVC.
+	// MetadataStorage configures fallback defaults for the shared master-data
+	// VolumeClaimTemplate when spec.master.metadataStorage is omitted. Master and
+	// shadow pods share one StatefulSet template, so this is not per-shadow
+	// storage configuration.
 	MetadataStorage *MasterStorageSpec `json:"metadataStorage,omitempty"`
-	// NodeSelector for shadow pods.
+	// NodeSelector is reserved for future per-shadow scheduling. It is rejected
+	// by the current controller because all master/shadow pods share one
+	// StatefulSet PodTemplate.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// Tolerations for shadow pods.
+	// Tolerations is reserved for future per-shadow scheduling. It is rejected by
+	// the current controller because all master/shadow pods share one StatefulSet
+	// PodTemplate.
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
-	// Resources for the shadow container.
+	// Resources is reserved for future per-shadow sizing. It is rejected by the
+	// current controller because all master/shadow pods share one StatefulSet
+	// PodTemplate.
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
@@ -336,8 +351,9 @@ type MountPath struct {
 	HostPath string `json:"hostPath,omitempty"`
 	// ClaimName references an existing PersistentVolumeClaim to mount.
 	ClaimName string `json:"claimName,omitempty"`
-	// StorageClassName and Size are used to dynamically provision a PVC if
-	// neither HostPath nor ClaimName is set.
+	// StorageClassName and Size are reserved for future dynamic PVC provisioning.
+	// The current controller rejects mountPaths without HostPath or ClaimName to
+	// avoid silently using ephemeral emptyDir storage.
 	StorageClassName string            `json:"storageClassName,omitempty"`
 	Size             resource.Quantity `json:"size,omitempty"`
 }

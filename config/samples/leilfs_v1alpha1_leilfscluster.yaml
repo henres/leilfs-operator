@@ -34,7 +34,10 @@ spec:
   # shadow automatically (no sfsmetarestore needed). Requires at least 1 replica.
   shadow:
     replicas: 1
-    image: ghcr.io/henres/leilfs-container/leilfs-master:5.9.0
+    # Shadows currently share the master StatefulSet PodTemplate. Per-shadow
+    # image/scheduling/resources are rejected until a separate shadow template
+    # is implemented. metadataStorage acts only as fallback defaults when
+    # spec.master.metadataStorage is omitted.
     metadataStorage:
       storageClassName: standard
       size: 1Gi
@@ -90,10 +93,10 @@ spec:
         mountPaths:
           - path: /mnt/hdd002
             hostPath: /mnt/hdd002
+  # CSI is declared for future compatibility but not implemented yet. Keep it
+  # disabled; csi.enabled=true is rejected by the controller.
   csi:
     enabled: false
-    driverName: leilfs.csi.leilfs-operator.io
-    image: ghcr.io/henres/leilfs-container/leilfs-client:5.9.0
   goals:
     # EC goal for maximum efficiency (6 CS required).
     - id: 10

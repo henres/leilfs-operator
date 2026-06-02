@@ -43,9 +43,10 @@ This is a Kubernetes operator written in Go (Kubebuilder) that manages LeilFS cl
 
 ## Roadmap
 
-See [TASK.md](../TASK.md) for the list of open tasks toward production readiness.
+See [`ROADMAP.md`](../../ROADMAP.md) at the LeilFS workspace root for the consolidated
+backlog of open tasks toward production readiness (supersedes the former `TASK.md`).
 
-Before starting a new task in the above plan, update progress in the plan.
+Before starting a task, check and update its status there.
 -->
 - Work through each checklist item systematically.
 - Keep communication concise and focused.

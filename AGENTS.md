@@ -120,7 +120,7 @@ are scraped into Prometheus by the **leilfs-exporter** sidecar.
   (`parser.go`, `collector.go`, `cmd/exporter/main.go`).
 - **Image**: `ghcr.io/henres/leilfs-operator/leilfs-exporter:<tag>`.
   Built from `docker/exporter.Dockerfile` on top of
-  `leilfs-client:5.9.0` so `saunafs-admin` is in PATH. Overridable
+  `leilfs-client:5.10.1` so `saunafs-admin` is in PATH. Overridable
   via `spec.master.exporter.image`.
 - **Endpoint**: `:9418/metrics` on every master Pod. The headless
   master Service exposes the same port for completeness.

@@ -55,7 +55,7 @@ const (
 	// matches this label so traffic always reaches the active pod.
 	labelActiveMaster = "leilfs.io/active-master"
 
-	defaultMasterImage = "ghcr.io/henres/leilfs-container/leilfs-master:5.9.0"
+	defaultMasterImage = "ghcr.io/henres/leilfs-container/leilfs-master:5.10.1"
 
 	// leaseDuration is how long a pod's Lease is valid without renewal.
 	// When the holder dies or is isolated, after this period a shadow can
@@ -862,7 +862,7 @@ func (r *LeilFSClusterReconciler) reconcileChunkStatefulSet(ctx context.Context,
 		image = cluster.Spec.Chunk.Image
 	}
 	if image == "" {
-		image = "ghcr.io/henres/leilfs-container/leilfs-chunkserver:5.9.0"
+		image = "ghcr.io/henres/leilfs-container/leilfs-chunkserver:5.10.1"
 	}
 
 	var replicas int32 = 1
@@ -1259,7 +1259,7 @@ func (r *LeilFSClusterReconciler) reconcileInterface(ctx context.Context, cluste
 
 	image := iface.Image
 	if image == "" {
-		image = "ghcr.io/henres/leilfs-container/leilfs-cgiserver:5.9.0"
+		image = "ghcr.io/henres/leilfs-container/leilfs-cgiserver:5.10.1"
 	}
 
 	port := iface.Port
@@ -1767,7 +1767,7 @@ func (r *LeilFSClusterReconciler) reconcileMetaloggers(ctx context.Context, clus
 	// ── defaults ─────────────────────────────────────────────────────────────
 	image := ml.Image
 	if image == "" {
-		image = "ghcr.io/henres/leilfs-container/leilfs-metalogger:5.9.0"
+		image = "ghcr.io/henres/leilfs-container/leilfs-metalogger:5.10.1"
 	}
 
 	storageSize := resource.MustParse("5Gi")

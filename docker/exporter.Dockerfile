@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
 # We only need saunafs-admin at runtime, but reusing this image avoids
 # packaging the upstream client tools twice (and tracking apt sources
 # for SaunaFS in another Dockerfile).
-FROM ghcr.io/henres/leilfs-container/leilfs-client:5.9.0
+FROM ghcr.io/henres/leilfs-container/leilfs-client:5.10.1
 
 # Override the leilfs-client entrypoint, which expects to fork sfsmount.
 # Our exporter is a long-running HTTP server and must run as PID 1.

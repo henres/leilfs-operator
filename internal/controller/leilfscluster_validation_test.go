@@ -90,7 +90,7 @@ var _ = Describe("LeilFSCluster unsupported API contract validation", func() {
 		cluster := &saunafsv1alpha1.LeilFSCluster{
 			ObjectMeta: metav1.ObjectMeta{Name: "unsupported-shadow", Namespace: "default"},
 			Spec: saunafsv1alpha1.LeilFSClusterSpec{
-				Master: saunafsv1alpha1.MasterSpec{Image: "ghcr.io/henres/leilfs-container/leilfs-master:5.9.0"},
+				Master: saunafsv1alpha1.MasterSpec{Image: "ghcr.io/henres/leilfs-container/leilfs-master:5.10.1"},
 				Shadow: &saunafsv1alpha1.ShadowSpec{
 					Image:        "ghcr.io/henres/leilfs-container/leilfs-master:experimental",
 					NodeSelector: map[string]string{"role": "shadow"},

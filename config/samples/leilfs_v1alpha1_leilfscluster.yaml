@@ -10,7 +10,7 @@ metadata:
   name: leilfscluster-sample
 spec:
   master:
-    image: ghcr.io/henres/leilfs-container/leilfs-master:5.9.0
+    image: ghcr.io/henres/leilfs-container/leilfs-master:5.10.1
     # nodeSelector:
     #   leilfs-role: master
     ports:
@@ -45,14 +45,14 @@ spec:
   # Each replica gets its own PVC (local-path StorageClass in Kind).
   metalogger:
     replicas: 2
-    image: ghcr.io/henres/leilfs-container/leilfs-metalogger:5.9.0
+    image: ghcr.io/henres/leilfs-container/leilfs-metalogger:5.10.1
     metadataStorage:
       storageClassName: standard
       size: 1Gi
   # Chunk servers — 1 chunkserver per disk, 2 disks per node, 3 nodes = 6 chunkservers.
   # label matches the node name so goals can pin chunks to specific nodes.
   chunk:
-    image: ghcr.io/henres/leilfs-container/leilfs-chunkserver:5.9.0
+    image: ghcr.io/henres/leilfs-container/leilfs-chunkserver:5.10.1
     ports:
       - name: data
         containerPort: 9422
@@ -115,7 +115,7 @@ spec:
         - worker3
   interface:
     enabled: true
-    image: ghcr.io/henres/leilfs-container/leilfs-cgiserver:5.9.0
+    image: ghcr.io/henres/leilfs-container/leilfs-cgiserver:5.10.1
     serviceType: NodePort
   nfs:
     enabled: true

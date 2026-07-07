@@ -1251,9 +1251,21 @@ func saunafsLabel(s string) string {
 
 func (r *LeilFSClusterReconciler) reconcileInterface(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	iface := &cluster.Spec.WebUI
+	name := fmt.Sprintf("%s-interface", cluster.Name)
 
-	// Skip if not explicitly enabled.
+	// When not explicitly enabled, clean up the Deployment/Service if they
+	// exist, mirroring the cleanup-on-disable behavior of the other
+	// toggle-based sub-reconcilers (reconcileExposeService, reconcileNFS,
+	// reconcileMetaloggers).
 	if iface.Enabled == nil || !*iface.Enabled {
+		for _, obj := range []client.Object{
+			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+			&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+		} {
+			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
@@ -1277,7 +1289,6 @@ func (r *LeilFSClusterReconciler) reconcileInterface(ctx context.Context, cluste
 		svcType = corev1.ServiceTypeClusterIP
 	}
 
-	name := fmt.Sprintf("%s-interface", cluster.Name)
 	labels := map[string]string{
 		"app.kubernetes.io/name":     "leilfs-interface",
 		"app.kubernetes.io/instance": cluster.Name,

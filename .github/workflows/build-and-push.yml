@@ -16,7 +16,7 @@ env:
 jobs:
   # ── Operator ─────────────────────────────────────────────────────────────
   build-operator:
-    name: Build saunafs-operator
+    name: Build leilfs-operator
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,7 +52,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push saunafs-operator
+      - name: Build and push leilfs-operator
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -61,9 +61,60 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           provenance: false
           tags: |
-            ${{ steps.meta.outputs.image_prefix }}/saunafs-operator:${{ steps.meta.outputs.image_tag }}
-          cache-from: type=gha,scope=saunafs-operator
-          cache-to:   type=gha,scope=saunafs-operator,mode=max
+            ${{ steps.meta.outputs.image_prefix }}/leilfs-operator:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=leilfs-operator
+          cache-to:   type=gha,scope=leilfs-operator,mode=max
+
+  # ── Exporter ─────────────────────────────────────────────────────────────
+  build-exporter:
+    name: Build leilfs-exporter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag and prefix
+        id: meta
+        run: |
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            IMAGE_TAG="${GITHUB_REF_NAME#v}"
+          else
+            IMAGE_TAG="latest"
+          fi
+          echo "image_prefix=${IMAGE_PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}"       >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push leilfs-exporter
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/exporter.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
+          tags: |
+            ${{ steps.meta.outputs.image_prefix }}/leilfs-exporter:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=leilfs-exporter
+          cache-to:   type=gha,scope=leilfs-exporter,mode=max
 
   # ── NFS-Ganesha ──────────────────────────────────────────────────────────
   # The NFS-Ganesha version and image tag are fixed in docker/docker-compose.yml.

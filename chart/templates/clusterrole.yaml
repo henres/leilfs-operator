@@ -10,13 +10,26 @@ rules:
     resources:
       - configmaps
       - persistentvolumeclaims
+      - serviceaccounts
       - services
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources:
+      - persistentvolumes
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: [get, list, watch, update, patch, delete]
   - apiGroups: [apps]
     resources:
       - daemonsets
       - deployments
       - statefulsets
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [coordination.k8s.io]
+    resources:
+      - leases
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [leilfs.leilfs-operator.io]
     resources:
@@ -30,3 +43,8 @@ rules:
     resources:
       - leilfsclusters/status
     verbs: [get, patch, update]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources:
+      - rolebindings
+      - roles
+    verbs: [get, list, watch, create, update, patch, delete]

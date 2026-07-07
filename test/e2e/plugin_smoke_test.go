@@ -18,10 +18,10 @@ package e2e
 
 // Smoke tests for the kubectl-leilfs plugin.
 //
-// The tests require a running Kind cluster with a LeilFSCluster deployed.
-// Start (or reset) the cluster with:
+// The tests require the shared sfs-lima cluster (bash
+// sfs-test-env/scripts/up.sh) with a LeilFSCluster deployed, e.g.:
 //
-//	make kind-reset
+//	kubectl --context sfs-lima apply -f sfs-test-env/leilfscluster-sample.yaml
 //
 // Then run the tests:
 //
@@ -32,8 +32,10 @@ package e2e
 //	PLUGIN_BIN      path to the plugin binary   (default: bin/kubectl-leilfs)
 //	PLUGIN_CLUSTER  LeilFSCluster name          (default: leilfscluster-sample)
 //	PLUGIN_NS       namespace                    (default: default)
+//	E2E_KUBE_CONTEXT kubectl context the plugin targets (default: sfs-lima)
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,10 +74,65 @@ func pluginEnv() (bin, cluster, ns string) {
 	return
 }
 
+// pluginKubeconfigOnce memoizes the scoped kubeconfig materialized by
+// pluginKubeconfig for the lifetime of the test binary.
+var pluginKubeconfigOnce struct {
+	path string
+	err  error
+	done bool
+}
+
+// pluginKubeconfig lazily extracts a minimal, single-context kubeconfig
+// scoped to utils.KubeContext() (sfs-lima by default) and returns its path.
+//
+// kubectl-leilfs has no --context flag: it always uses whatever kubeconfig's
+// current-context happens to be (see cmd/kubectl-leilfs/cmd/root.go).
+// Passing the ambient kubeconfig through unmodified would let the plugin
+// silently pick up whatever context is active on the machine running the
+// tests -- this workspace's kubectl config also has unrelated shared/
+// corporate clusters registered, and one of those is typically the ambient
+// default. Extracting a scoped, single-context kubeconfig once per run keeps
+// every plugin invocation pinned to sfs-lima regardless of the ambient
+// default context.
+func pluginKubeconfig() (string, error) {
+	if pluginKubeconfigOnce.done {
+		return pluginKubeconfigOnce.path, pluginKubeconfigOnce.err
+	}
+	pluginKubeconfigOnce.done = true
+
+	out, err := exec.Command("kubectl", "config", "view",
+		"--minify", "--flatten", "--context", utils.KubeContext()).Output()
+	if err != nil {
+		pluginKubeconfigOnce.err = fmt.Errorf("extracting kubeconfig for context %q: %w", utils.KubeContext(), err)
+		return "", pluginKubeconfigOnce.err
+	}
+
+	f, err := os.CreateTemp("", "kubectl-leilfs-e2e-*.kubeconfig")
+	if err != nil {
+		pluginKubeconfigOnce.err = err
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(out); err != nil {
+		pluginKubeconfigOnce.err = err
+		return "", err
+	}
+	pluginKubeconfigOnce.path = f.Name()
+	return pluginKubeconfigOnce.path, nil
+}
+
 // runPlugin executes the plugin binary with the given arguments and returns
-// combined stdout+stderr output and the error (if any).
+// combined stdout+stderr output and the error (if any). KUBECONFIG is always
+// pinned to a kubeconfig scoped to utils.KubeContext() (see
+// pluginKubeconfig), so the plugin never depends on the ambient default
+// kubectl context.
 func runPlugin(bin string, args ...string) (string, error) {
 	cmd := exec.Command(bin, args...)
+	kubeconfig, err := pluginKubeconfig()
+	if err != nil {
+		return "", err
+	}
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

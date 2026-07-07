@@ -20,10 +20,11 @@
 #   9. Verify the former master restarted as shadow.
 #
 # Prerequisites:
-#   - Kind cluster "leilfs-operator" running with a deployed LeilFSCluster
-#     that has spec.shadow set (HA mode).
-#   - kubectl context kind-leilfs-operator must be accessible.
-#   - docker CLI available (used to access NFS via Kind nodes).
+#   - sfs-lima cluster running (bash sfs-test-env/scripts/up.sh) with a
+#     deployed LeilFSCluster that has spec.shadow set (HA mode).
+#   - kubectl context "sfs-lima" must be accessible (never relies on the
+#     ambient default context).
+#   - limactl CLI available (used to access NFS from the sfs-cp Lima VM).
 #
 # Usage:
 #   bash test/master-failover.sh
@@ -31,7 +32,7 @@
 
 set -euo pipefail
 
-KUBE="kubectl --context kind-leilfs-operator"
+KUBE="kubectl --context sfs-lima"
 NS="default"
 CLUSTER="leilfscluster-sample"
 MASTER_STS="${CLUSTER}-master"
@@ -119,8 +120,9 @@ step "2. Write test data into LeilFS via NFS"
 TEST_FILE="failover-test-$(date +%s).txt"
 TEST_CONTENT="master-failover-sentinel-$(date -u +%Y%m%dT%H%M%SZ)"
 
-echo "    Mounting NFS inside Kind control-plane node and writing test file..."
-docker exec leilfs-operator-control-plane bash -c "
+echo "    Mounting NFS inside the sfs-cp Lima VM and writing test file..."
+limactl shell sfs-cp -- sudo bash -c "
+    apt-get update -qq 2>/dev/null
     apt-get install -y -q nfs-common 2>/dev/null | tail -1
     mkdir -p /mnt/leilfs-test
     mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/leilfs-test 2>/dev/null || \
@@ -206,7 +208,7 @@ $KUBE rollout restart deployment "$NFS_DEPLOY" -n "$NS"
 $KUBE rollout status deployment "$NFS_DEPLOY" -n "$NS" --timeout=90s
 
 echo "    Re-mounting NFS and reading test file..."
-FOUND=$(docker exec leilfs-operator-control-plane bash -c "
+FOUND=$(limactl shell sfs-cp -- sudo bash -c "
     mkdir -p /mnt/leilfs-test
     mount -t nfs -o vers=3,nolock ${NFS_SVC_IP}:/ /mnt/leilfs-test 2>/dev/null || \
         mount -t nfs4 ${NFS_SVC_IP}:/ /mnt/leilfs-test

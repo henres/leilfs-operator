@@ -66,15 +66,19 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
+# Requires the shared sfs-lima cluster (bash sfs-test-env/scripts/up.sh);
+# always targets kubectl context "sfs-lima" explicitly, never the ambient
+# default context. Override with E2E_KUBE_CONTEXT=... if needed.
+.PHONY: test-e2e  # Run the e2e tests against the shared sfs-lima cluster.
 test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
 # PLUGIN_BIN     - path to the plugin binary (default: bin/kubectl-leilfs)
 # PLUGIN_CLUSTER - LeilFSCluster name to test against (default: leilfscluster-sample)
 # PLUGIN_NS      - namespace (default: default)
-# Requires a running Kind cluster: make kind-reset
+# Requires the shared sfs-lima cluster with the sample LeilFSCluster deployed:
+#   bash sfs-test-env/scripts/up.sh
+#   kubectl --context sfs-lima apply -f sfs-test-env/leilfscluster-sample.yaml
 PLUGIN_BIN     ?= bin/kubectl-leilfs
 PLUGIN_CLUSTER ?= leilfscluster-sample
 PLUGIN_NS      ?= default

@@ -31,26 +31,24 @@ const namespace = "leilfs-operator-system"
 
 var _ = Describe("controller", Ordered, func() {
 	BeforeAll(func() {
-		By("installing prometheus operator")
-		Expect(utils.InstallPrometheusOperator()).To(Succeed())
-
-		By("installing the cert-manager")
-		Expect(utils.InstallCertManager()).To(Succeed())
-
+		// NOTE: cert-manager and the Prometheus Operator are intentionally
+		// NOT installed here. They are required, cluster-wide components
+		// already provisioned once on the shared sfs-lima test cluster (see
+		// the workspace AGENTS.md and sfs-test-env/scripts); config/default
+		// doesn't even wire up the certmanager/prometheus kustomize
+		// components for this operator. Re-installing (or worse,
+		// uninstalling in AfterAll) cluster-wide components here previously
+		// caused `kubectl create -f <github bundle URL>` to run with no
+		// explicit --context, silently hitting whatever the ambient default
+		// kubectl context happened to be (a corporate SSO-gated cluster).
 		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
+		cmd := utils.KubectlCommand("create", "ns", namespace)
 		_, _ = utils.Run(cmd)
 	})
 
 	AfterAll(func() {
-		By("uninstalling the Prometheus manager bundle")
-		utils.UninstallPrometheusOperator()
-
-		By("uninstalling the cert-manager bundle")
-		utils.UninstallCertManager()
-
 		By("removing manager namespace")
-		cmd := exec.Command("kubectl", "delete", "ns", namespace)
+		cmd := utils.KubectlCommand("delete", "ns", namespace)
 		_, _ = utils.Run(cmd)
 	})
 
@@ -59,16 +57,17 @@ var _ = Describe("controller", Ordered, func() {
 			var controllerPodName string
 			var err error
 
-			// projectimage stores the name of the image used in the example
-			var projectimage = "example.com/leilfs-operator:v0.0.1"
+			// projectimage stores the name of the dev image built and
+			// pushed to the henres fork registry (see workspace AGENTS.md).
+			var projectimage = "ghcr.io/henres/leilfs-operator/leilfs-operator:dev"
 
 			By("building the manager(Operator) image")
 			cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectimage))
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
-			By("loading the the manager(Operator) image on Kind")
-			err = utils.LoadImageToKindClusterWithName(projectimage)
+			By("loading the manager(Operator) image into every sfs-lima node's containerd")
+			err = utils.LoadImagesIntoCluster()
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
 			By("installing CRDs")
@@ -84,7 +83,7 @@ var _ = Describe("controller", Ordered, func() {
 			verifyControllerUp := func() error {
 				// Get pod name
 
-				cmd = exec.Command("kubectl", "get",
+				cmd = utils.KubectlCommand("get",
 					"pods", "-l", "control-plane=controller-manager",
 					"-o", "go-template={{ range .items }}"+
 						"{{ if not .metadata.deletionTimestamp }}"+
@@ -103,7 +102,7 @@ var _ = Describe("controller", Ordered, func() {
 				ExpectWithOffset(2, controllerPodName).Should(ContainSubstring("controller-manager"))
 
 				// Validate pod status
-				cmd = exec.Command("kubectl", "get",
+				cmd = utils.KubectlCommand("get",
 					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
 					"-n", namespace,
 				)

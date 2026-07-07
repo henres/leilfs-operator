@@ -20,30 +20,31 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:golint,revive
 )
 
-const (
-	prometheusOperatorVersion = "v0.68.0"
-	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
-		"releases/download/%s/bundle.yaml"
-
-	certmanagerVersion = "v1.5.3"
-	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
-)
-
-func warnError(err error) {
-	fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
+// KubeContext returns the kubectl context the e2e suite must target. It
+// defaults to "sfs-lima", the shared Lima-VM k3s test cluster documented in
+// the workspace AGENTS.md, and must never silently fall back to whatever
+// context happens to be current on the machine running the tests -- this
+// workspace's kubectl config also has unrelated shared/corporate clusters
+// registered, and one of those is typically the ambient default context.
+func KubeContext() string {
+	if c := os.Getenv("E2E_KUBE_CONTEXT"); c != "" {
+		return c
+	}
+	return "sfs-lima"
 }
 
-// InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
-func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "create", "-f", url)
-	_, err := Run(cmd)
-	return err
+// KubectlCommand builds an *exec.Cmd for kubectl that always pins --context
+// explicitly via KubeContext, so e2e commands never depend on the ambient
+// default kubectl context.
+func KubectlCommand(args ...string) *exec.Cmd {
+	full := append([]string{"--context", KubeContext()}, args...)
+	return exec.Command("kubectl", full...)
 }
 
 // Run executes the provided command within this context
@@ -55,7 +56,14 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 		fmt.Fprintf(GinkgoWriter, "chdir dir: %s\n", err)
 	}
 
-	cmd.Env = append(os.Environ(), "GO111MODULE=on")
+	cmd.Env = append(os.Environ(),
+		"GO111MODULE=on",
+		// Pin any Makefile target invoked here that shells out via
+		// $(KUBECTL) (e.g. "make install" / "make deploy") to the sfs-lima
+		// context explicitly, instead of letting it fall back to the
+		// ambient default kubectl context.
+		fmt.Sprintf("KUBECTL=kubectl --context %s", KubeContext()),
+	)
 	command := strings.Join(cmd.Args, " ")
 	fmt.Fprintf(GinkgoWriter, "running: %s\n", command)
 	output, err := cmd.CombinedOutput()
@@ -66,52 +74,22 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 	return output, nil
 }
 
-// UninstallPrometheusOperator uninstalls the prometheus
-func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// UninstallCertManager uninstalls the cert manager
-func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// InstallCertManager installs the cert manager bundle.
-func InstallCertManager() error {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "apply", "-f", url)
-	if _, err := Run(cmd); err != nil {
+// LoadImagesIntoCluster imports the locally built operator image(s) into
+// containerd on every sfs-lima node. There is no "kind load" equivalent for
+// a k3s-on-Lima cluster: images must be docker-built locally first (with
+// the ghcr.io/henres/... :dev tags) and then streamed into each VM's
+// containerd via sfs-test-env/scripts/load-images.sh, which loads a fixed
+// list of dev images onto sfs-cp/sfs-w1/sfs-w2/sfs-w3.
+func LoadImagesIntoCluster() error {
+	projectDir, err := GetProjectDir()
+	if err != nil {
 		return err
 	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
-
-	_, err := Run(cmd)
-	return err
-}
-
-// LoadImageToKindCluster loads a local docker image to the kind cluster
-func LoadImageToKindClusterWithName(name string) error {
-	cluster := "kind"
-	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
-		cluster = v
-	}
-	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
-	cmd := exec.Command("kind", kindOptions...)
-	_, err := Run(cmd)
+	// sfs-test-env is a sibling checkout at the workspace root:
+	//   <workspace>/leilfs-operator, <workspace>/localdisk-operator, <workspace>/sfs-test-env
+	script := filepath.Join(projectDir, "..", "sfs-test-env", "scripts", "load-images.sh")
+	cmd := exec.Command("bash", script)
+	_, err = Run(cmd)
 	return err
 }
 

@@ -1,0 +1,156 @@
+name: Release
+
+# A version tag (v0.1.0, v1.2.3, ...) is the single trigger for a release.
+# See "Cutting a release" in AGENTS.md for the full human-facing checklist;
+# everything below is what happens automatically once the tag is pushed.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── Installer YAML + GitHub Release ─────────────────────────────────────
+  # Builds dist/install.yaml with the real, just-published image reference
+  # baked in (build-and-push.yml publishes the images for the same tag),
+  # creates the GitHub Release, attaches the installer, and regenerates
+  # CHANGELOG.md from Conventional Commit history.
+  github-release:
+    name: Build installer, publish GitHub Release, refresh CHANGELOG.md
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release + upload assets + push CHANGELOG.md
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, needed by git-cliff
+
+      - name: Resolve version and image reference from the tag
+        id: meta
+        run: |
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "img=${IMAGE_PREFIX}/leilfs-operator:${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Read Go version from go.mod
+        id: goversion
+        run: |
+          version="$(grep -m1 '^go ' go.mod | awk '{print $2}')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.goversion.outputs.version }}
+          cache: true
+
+      - name: Build consolidated installer YAML (dist/install.yaml)
+        run: make build-installer IMG=${{ steps.meta.outputs.img }}
+
+      - name: Generate release notes for this tag only (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        id: release-notes
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        # No OUTPUT file needed -- the action's `content` output holds the
+        # rendered text directly, consumed below as the Release body.
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.release-notes.outputs.content }}
+          files: dist/install.yaml
+          fail_on_unmatched_files: true
+
+      - name: Regenerate the full CHANGELOG.md
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ github.ref_name }}
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Push regenerated CHANGELOG.md to the default branch (best effort)
+        # This is a direct push to `master`, not a PR: for a single-maintainer
+        # repo with no branch protection it is the simplest thing that keeps
+        # working. It is deliberately non-blocking (continue-on-error) so that
+        # if branch protection is ever turned on, a rejected push cannot fail
+        # an otherwise-successful release (image already published by
+        # build-and-push.yml, installer + GitHub Release already created
+        # above). Pushes made with the default GITHUB_TOKEN do not themselves
+        # trigger other workflow runs, so this cannot loop back into
+        # build-and-push.yml/test.yml. See "Cutting a release" in AGENTS.md.
+        continue-on-error: true
+        run: |
+          cp CHANGELOG.md /tmp/CHANGELOG.new.md
+          # Discard the uncommitted CHANGELOG.md (and any other working-tree
+          # state from the steps above) on this detached tag checkout before
+          # switching branches -- we already saved the content we want above.
+          git reset --hard HEAD
+          git fetch origin master
+          git checkout -B master origin/master
+          cp /tmp/CHANGELOG.new.md CHANGELOG.md
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git add CHANGELOG.md
+            git commit -m "docs(changelog): regenerate CHANGELOG.md for ${GITHUB_REF_NAME}"
+            git push origin master
+          else
+            echo "CHANGELOG.md already up to date on master, nothing to push."
+          fi
+
+  # ── Helm chart (OCI) ─────────────────────────────────────────────────────
+  # Published under a distinct "charts/" path so the chart artifact never
+  # collides with the leilfs-operator / leilfs-exporter container image
+  # packages that already live at ghcr.io/henres/leilfs-operator/*.
+  helm-chart:
+    name: Package and publish Helm chart to GHCR (OCI)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version from the tag
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          # Pinned (this repo's other tools -- kustomize, controller-gen,
+          # etc. -- are pinned in the Makefile too) to the version this
+          # chart was locally validated against (helm lint / package /
+          # template) while writing this workflow.
+          version: v4.2.3
+
+      - name: Bump chart/Chart.yaml version and appVersion to match the tag
+        # Operates on this job's checkout only -- never committed back.
+        # Requiring a human to remember to hand-edit Chart.yaml before every
+        # tag is exactly the kind of drift this workflow exists to remove.
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          sed -i "s/^version: .*/version: ${VERSION}/" chart/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" chart/Chart.yaml
+          cat chart/Chart.yaml
+
+      - name: Package the chart
+        run: helm package chart/ --destination /tmp/chart-dist
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push chart to GHCR (OCI)
+        run: |
+          helm push /tmp/chart-dist/leilfs-operator-${{ steps.meta.outputs.version }}.tgz \
+            oci://${{ env.REGISTRY }}/henres/leilfs-operator/charts

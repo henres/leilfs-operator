@@ -70,9 +70,17 @@ make undeploy
 
 ## Project Distribution
 
-Following are the steps to build the installer and distribute this project to users.
+`dist/install.yaml` is a generated build artefact (see `.gitignore`) — it
+is never committed to the repo tree. It is produced and published in two
+ways:
 
-1. Build the installer for the image built and published in the registry:
+- **Tagged releases** (`v0.1.0`, `v1.2.3`, ...): `.github/workflows/release.yml`
+  runs `make build-installer` with the just-published image reference and
+  attaches the result to the corresponding [GitHub Release](https://github.com/henres/leilfs-operator/releases)
+  as `install.yaml`. See "Cutting a release" in `AGENTS.md` for how a
+  release is cut and what else the workflow does (CHANGELOG.md, Helm
+  chart).
+- **Local/manual builds**: build it yourself for any image reference:
 
 ```sh
 make build-installer IMG=<some-registry>/leilfs-operator:tag
@@ -83,12 +91,20 @@ file in the dist directory. This file contains all the resources built
 with Kustomize, which are necessary to install this project without
 its dependencies.
 
-2. Using the installer
+### Using the installer
 
-Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.:
+Once a release exists, install directly from its Release asset (this is
+the URL that actually resolves — a plain `raw.githubusercontent.com` path
+would 404, since `dist/install.yaml` is intentionally not committed):
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/leilfs-operator/<tag or branch>/dist/install.yaml
+kubectl apply -f https://github.com/henres/leilfs-operator/releases/download/<tag>/install.yaml
+```
+
+Or install via the Helm chart published alongside every release:
+
+```sh
+helm install leilfs-operator oci://ghcr.io/henres/leilfs-operator/charts/leilfs-operator --version <version>
 ```
 
 ## Contributing

@@ -33,3 +33,8 @@ go.work
 /kubectl-leilfs
 /main
 /e2e.test
+
+# make build-installer output (dist/install.yaml) -- generated locally and
+# in .github/workflows/release.yml, published as a GitHub Release asset,
+# never committed to the repo tree.
+/dist/

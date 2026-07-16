@@ -69,6 +69,58 @@ the diff alone does not convey. Wrap at ~72 chars. See
 `.opencode/skills/commit-after-validation/SKILL.md` for the full
 checklist (run `make test` and `make manifests` before staging).
 
+## Cutting a release
+
+Releases are cut by pushing a `v<semver>` tag from an up-to-date `master`
+tip — that single push is the trigger for everything else:
+
+```sh
+git checkout master && git pull
+git tag v0.2.0            # MAJOR.MINOR.PATCH; bump PATCH for fixes,
+                           # MINOR for backwards-compatible features,
+                           # MAJOR for breaking API/CRD changes
+git push origin v0.2.0
+```
+
+That tag push fans out into two independent workflows:
+
+- `.github/workflows/build-and-push.yml` (pre-existing) builds and pushes
+  the `leilfs-operator`, `leilfs-exporter`, and `nfs-ganesha` images tagged
+  `<tag-without-v>` to `ghcr.io/henres/leilfs-operator/...`.
+- `.github/workflows/release.yml` (this roadmap item):
+  - `github-release` job: runs `make build-installer` with that same
+    just-published image reference, creates a GitHub Release for the tag,
+    attaches the resulting `dist/install.yaml` as a release asset, and
+    regenerates `CHANGELOG.md` from Conventional Commit history via
+    [git-cliff](https://git-cliff.org/) (config in `cliff.toml`) — both as
+    the Release's own notes (`--latest`, this tag only) and as the
+    repo-wide `CHANGELOG.md` (full history), which it then pushes straight
+    to `master` as a best-effort, non-blocking step (`continue-on-error`).
+    A direct push rather than a release-please-style PR was chosen because
+    this is a single-maintainer repo with no branch protection yet; if
+    that push is ever rejected (branch protection turned on, required
+    reviews, etc.) the release itself still succeeds — the job doesn't
+    fail — you just regenerate `CHANGELOG.md` locally
+    (`git-cliff -o CHANGELOG.md`) and commit it by hand.
+  - `helm-chart` job: bumps `chart/Chart.yaml`'s `version`/`appVersion` to
+    the tag (in that job's checkout only — never committed back, so
+    `chart/Chart.yaml` in git always reads `0.1.0` and that's expected),
+    packages the chart, and pushes it to
+    `oci://ghcr.io/henres/leilfs-operator/charts` (a distinct path from
+    the `leilfs-operator`/`leilfs-exporter` image packages that already
+    live under `ghcr.io/henres/leilfs-operator/`, so the chart artifact
+    can never collide with an image tag of the same name).
+
+Why git-cliff over release-please or a hand-maintained changelog: this
+repo already disciplines itself to Conventional Commits (see below), so a
+tool that mechanically turns `feat:`/`fix:`/... commits between tags into
+changelog sections needs no upkeep beyond `cliff.toml`, and
+`orhun/git-cliff-action` is a maintained, off-the-shelf GitHub Action —
+no new local dependency, nothing to run by hand.
+
+Never create or push a tag as an agent unless a human explicitly asks for
+that specific release.
+
 ## HA master election
 
 Active-master selection uses a Kubernetes `Lease` and a shell sidecar

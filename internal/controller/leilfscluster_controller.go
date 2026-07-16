@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -71,6 +73,16 @@ const (
 	// sync the Service selector and status.  It does NOT renew the Lease —
 	// that is the sidecar's responsibility.
 	leaseObserveInterval = 5 * time.Second
+
+	// leilfsClusterFinalizer blocks API-server deletion of a LeilFSCluster
+	// until finalizeCluster has run. Almost every object this controller
+	// creates already carries an owner reference back to the LeilFSCluster
+	// (see the SetControllerReference calls throughout this file), so the
+	// Kubernetes garbage collector cascades their deletion on its own; this
+	// finalizer exists as a safety net / extension point for the day a new
+	// dynamically-provisioned resource is added without one — see
+	// finalizeCluster's doc comment for the full picture.
+	leilfsClusterFinalizer = "leilfs.leilfs-operator.io/cleanup"
 )
 
 type unsupportedSpecError struct {
@@ -296,6 +308,7 @@ func masterPodAntiAffinity(stsName string) *corev1.Affinity {
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
 func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -311,6 +324,35 @@ func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	logger.Info("Reconciling LeilFSCluster", "name", cluster.Name)
+
+	// ── Finalizer handling ────────────────────────────────────────────────────
+	// Standard controller-runtime finalizer dance: register the finalizer on
+	// first sight of a live object; once the object is marked for deletion,
+	// run cleanup and only then let the finalizer go so the API server can
+	// actually remove it.
+	if cluster.DeletionTimestamp.IsZero() {
+		if !controllerutil.ContainsFinalizer(cluster, leilfsClusterFinalizer) {
+			controllerutil.AddFinalizer(cluster, leilfsClusterFinalizer)
+			if err := r.Update(ctx, cluster); err != nil {
+				return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+			}
+		}
+	} else {
+		if controllerutil.ContainsFinalizer(cluster, leilfsClusterFinalizer) {
+			if err := r.finalizeCluster(ctx, cluster); err != nil {
+				return ctrl.Result{}, fmt.Errorf("finalizing cluster: %w", err)
+			}
+			controllerutil.RemoveFinalizer(cluster, leilfsClusterFinalizer)
+			if err := r.Update(ctx, cluster); err != nil {
+				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			}
+		}
+		// Deletion in progress: skip normal reconciliation entirely. There is
+		// nothing left to do once cleanup has run (or the finalizer was
+		// already gone) — creating/updating owned objects for a cluster that
+		// is being torn down would just be undone by the garbage collector.
+		return ctrl.Result{}, nil
+	}
 
 	// Snapshot the cluster object BEFORE any reconcile step mutates its status,
 	// so the MergePatch below captures all status changes made during reconcile.
@@ -329,6 +371,7 @@ func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		{"master service", r.reconcileMasterService},
 		{"master ha rbac", r.reconcileMasterHARBAC},
 		{"master ha", r.reconcileMasterHA},
+		{"master pdb", r.reconcileMasterPodDisruptionBudget},
 		{"chunk servers", r.reconcileChunkServers},
 		{"auto-discover chunk servers", r.reconcileAutoDiscoverChunkServers},
 		{"metaloggers", r.reconcileMetaloggers},
@@ -394,6 +437,42 @@ func (r *LeilFSClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{}, reconcileErr
+}
+
+// finalizeCluster runs cleanup for a LeilFSCluster that is being deleted,
+// before its finalizer is removed and the API server is allowed to finish
+// deleting the object.
+//
+// What actually needs cleanup here (audited by checking every SetControllerReference
+// call in this file): NOTHING, as of today. Every object this controller
+// creates — the goals ConfigMap, master/chunk/metalogger headless Services,
+// the chunk hdd ConfigMap, chunk/metalogger StatefulSets, the interface and
+// NFS Deployments/Services/ConfigMaps, the master HA Lease and its
+// ServiceAccount/Role/RoleBinding, and — importantly — the PVC that
+// ensureAutoDiscoverPVC creates for each auto-discovered PV — all carry an
+// owner reference back to the LeilFSCluster. The Kubernetes garbage
+// collector already cascades their deletion; there is no gap for a
+// finalizer to fill for those.
+//
+// The one thing that is deliberately NOT touched here is the master/shadow
+// metadata PVC created via the master StatefulSet's VolumeClaimTemplate
+// (see reconcileMasterStatefulSet's doc comment): those PVCs intentionally
+// survive both StatefulSet and CR deletion so filesystem metadata isn't
+// destroyed by an operator action. Deleting them would defeat the entire
+// point of "hardening" the cluster lifecycle, so this finalizer must never
+// do so — not even as an opt-in.
+//
+// This function is therefore a deliberate no-op today. It is kept as the
+// designated extension point for any future dynamically-provisioned
+// resource that can't carry an owner reference (e.g. anything cluster-scoped,
+// since owner references cannot cross from a namespaced owner to a
+// cluster-scoped object) or that is otherwise created without one by
+// mistake.
+func (r *LeilFSClusterReconciler) finalizeCluster(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Finalizing LeilFSCluster: all owned resources are garbage-collected via owner references; no explicit cleanup required",
+		"name", cluster.Name, "namespace", cluster.Namespace)
+	return nil
 }
 
 // publishMetrics updates Prometheus collectors from the freshly
@@ -694,6 +773,26 @@ func masterContainerPorts(cluster *saunafsv1alpha1.LeilFSCluster) []corev1.Conta
 		{Name: "cs", ContainerPort: 9420},
 		{Name: "client", ContainerPort: 9421},
 	}
+}
+
+// masterProbePort picks the container port most indicative that sfsmaster has
+// finished loading metadata and is actually accepting connections: prefer the
+// "client" port (the one saunafs-client mounts and the master Service target
+// primarily forwards), falling back to "admin" if a spec.master.ports override
+// omits "client", and finally to the hardcoded default client port if the
+// override has neither name.
+func masterProbePort(ports []corev1.ContainerPort) int32 {
+	for _, p := range ports {
+		if p.Name == "client" {
+			return p.ContainerPort
+		}
+	}
+	for _, p := range ports {
+		if p.Name == "admin" {
+			return p.ContainerPort
+		}
+	}
+	return 9421
 }
 
 // ── Master Service ──────────────────────────────────────────────────────────
@@ -2088,6 +2187,27 @@ func (r *LeilFSClusterReconciler) reconcileMasterStatefulSet(ctx context.Context
 `
 	}
 
+	// ── Default goal (SFSMASTER_DEFAULT_GOAL) ─────────────────────────────────
+	// reconcileGoalsConfigMap only ever wrote an *informational* snippet
+	// (sfsmaster-default-goal.txt) describing this line — nothing actually
+	// added it to the sfsmaster.cfg the master reads. Thread the default
+	// goal's name (if any) into the init-config script using the same
+	// idempotent sed/grep pattern as PERSONALITY/MASTER_HOST below. At most
+	// one goal should have Default=true; the first one found wins. When no
+	// goal is marked default, defaultGoalCmd stays empty and no line is added
+	// (preserving the master's built-in default goal).
+	var defaultGoalCmd string
+	for _, g := range cluster.Spec.Goals {
+		if g.Default {
+			defaultGoalCmd = fmt.Sprintf(`
+# ── Apply default goal ───────────────────────────────────────────────────
+sed -i 's/^# *SFSMASTER_DEFAULT_GOAL *= *.*/SFSMASTER_DEFAULT_GOAL = %s/' /etc/saunafs/sfsmaster.cfg
+grep -q "^SFSMASTER_DEFAULT_GOAL" /etc/saunafs/sfsmaster.cfg || echo "SFSMASTER_DEFAULT_GOAL = %s" >> /etc/saunafs/sfsmaster.cfg`,
+				g.Name, g.Name)
+			break
+		}
+	}
+
 	leaseName := fmt.Sprintf("%s-master-ha", cluster.Name)
 	saName := fmt.Sprintf("%s-master", cluster.Name)
 
@@ -2140,8 +2260,9 @@ else
   grep -q "^MASTER_PORT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_PORT = 9419" >> /etc/saunafs/sfsmaster.cfg
   grep -q "^MASTER_RECONNECTION_DELAY" /etc/saunafs/sfsmaster.cfg || echo "MASTER_RECONNECTION_DELAY = 5" >> /etc/saunafs/sfsmaster.cfg
   grep -q "^MASTER_TIMEOUT" /etc/saunafs/sfsmaster.cfg || echo "MASTER_TIMEOUT = 60" >> /etc/saunafs/sfsmaster.cfg
-fi`,
-		goalsCmd, leaseName, masterHost, masterHost)
+fi
+%s`,
+		goalsCmd, leaseName, masterHost, masterHost, defaultGoalCmd)
 
 	initMetaCmd := "cp -n /opt/saunafs/templates/metadata.sfs.empty /var/lib/saunafs/metadata.sfs 2>/dev/null || true"
 
@@ -2283,6 +2404,69 @@ while true; do
       echo "[ha-sidecar] Lease has no renewTime, attempting acquisition"
     fi
 
+    # ── Bounded staleness heuristic before acquisition ──────────────────────
+    # KNOWN, DOCUMENTED TRADE-OFF (ROADMAP.md "Durcissement opérateur" / ADR-0001):
+    # the CAS below is still first-come-first-served — whichever shadow's PATCH
+    # lands first with a matching resourceVersion wins, full stop. This block
+    # does NOT change that and does NOT add a second coordination mechanism.
+    # It only delays THIS shadow's own CAS attempt when its local metadata
+    # looks stale, giving a fresher shadow a head start to win the race.
+    #
+    # What it does NOT guarantee:
+    #   - It does NOT guarantee the most up-to-date shadow is promoted. If all
+    #     shadows are equally stale (or equally fresh), or if the delay below
+    #     races against another shadow's delayed attempt, an arbitrary one
+    #     still wins — exactly as before this change.
+    #   - It can misfire on an idle filesystem: if no metadata operations have
+    #     happened recently, changelog.sfs looks "stale" on every shadow even
+    #     though all of them are perfectly in sync. In that case every shadow
+    #     computes a similar delay and the relative ordering this heuristic
+    #     relies on degenerates to roughly no signal — it does not make things
+    #     worse than today, it just fails to help.
+    #   - It only ever delays the CAS *attempt*; it never blocks, weakens, or
+    #     bypasses the atomic resourceVersion CAS itself. If a fresher shadow
+    #     (or one with a shorter/no delay) wins during our sleep, our stale
+    #     RES_VER simply fails to match server-side and this shadow's PATCH is
+    #     rejected — handled by the existing "acquisition lost race" branch
+    #     below, no new failure mode introduced.
+    #
+    # Signal: mtime of /var/lib/saunafs/changelog.sfs. SaunaFS appends to this
+    # file continuously as the shadow receives metadata changes streamed from
+    # the active master ("immediately updated incremental logs" per SaunaFS
+    # docs), so a well-connected shadow's changelog.sfs is touched far more
+    # recently than one that has been lagging or disconnected. Requires the
+    # ha-sidecar container to read-only-mount the master-data volume (see
+    # VolumeMounts above) — without that mount, stat always fails and this
+    # falls through to the ordinal fallback below on every attempt.
+    STALE_DELAY=0
+    CHANGELOG_MTIME=$(stat -c %%Y /var/lib/saunafs/changelog.sfs 2>/dev/null || echo 0)
+    if [ "${CHANGELOG_MTIME}" != "0" ]; then
+      CHANGELOG_AGE=$(( $(date -u +%%s) - CHANGELOG_MTIME ))
+      if [ ${CHANGELOG_AGE} -gt ${LEASE_DURATION} ]; then
+        # Only penalize staleness *beyond* what a silent (dead) master alone
+        # would already explain, and halve it so the delay is a nudge, not a
+        # second failover timer.
+        STALE_DELAY=$(( (CHANGELOG_AGE - LEASE_DURATION) / 2 ))
+      fi
+    else
+      # No local changelog observed (e.g. very first bootstrap, before any
+      # metadata write has ever happened). This is NOT a staleness signal —
+      # it is a crude, deterministic first-mover tie-breaker only, per
+      # ROADMAP.md's explicit fallback: jitter proportional to the pod's
+      # StatefulSet ordinal, so shadows don't all attempt the CAS in lockstep.
+      ORDINAL=$(printf '%%s' "${MY_POD}" | sed 's/.*-\([0-9][0-9]*\)$/\1/')
+      case "${ORDINAL}" in ''|*[!0-9]*) ORDINAL=0 ;; esac
+      STALE_DELAY=${ORDINAL}
+    fi
+    # Cap: this is a bounded nudge, not a new source of failover latency —
+    # 15s keeps the worst-case extra delay well under a second full Lease
+    # duration (30s).
+    [ ${STALE_DELAY} -gt 15 ] && STALE_DELAY=15
+    if [ ${STALE_DELAY} -gt 0 ]; then
+      echo "[ha-sidecar] backing off ${STALE_DELAY}s before acquisition attempt (staleness heuristic, changelog_age=${CHANGELOG_AGE:-n/a}s)"
+      sleep ${STALE_DELAY}
+    fi
+
     # Atomic CAS: PATCH only if resourceVersion matches
     NOW=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%S.000000Z)
     CAS_BODY="{\"metadata\":{\"resourceVersion\":\"${RES_VER}\"},\"spec\":{\"holderIdentity\":\"${MY_POD}\",\"acquireTime\":\"${NOW}\",\"renewTime\":\"${NOW}\",\"leaseDurationSeconds\":${LEASE_DURATION}}}"
@@ -2321,6 +2505,37 @@ done
 	volumes := append([]corev1.Volume{cfgVolume}, goalsVolume...)
 
 	ports := masterContainerPorts(cluster)
+	probePort := masterProbePort(ports)
+
+	// Readiness/liveness probes: a bare TCP connect to the client port is
+	// enough to detect "sfsmaster hasn't finished loading metadata and isn't
+	// listening yet" without requiring new tooling in the image. Before this,
+	// nothing gated Service traffic on the master actually being up, so a pod
+	// could receive requests immediately after container start.
+	//
+	// Readiness is deliberately more lenient than liveness (higher
+	// FailureThreshold, no InitialDelaySeconds) since a failing readiness
+	// probe only pulls the pod out of Service endpoints — cheap to retry
+	// often. Liveness reuses startupGrace (the same grace period the
+	// ha-sidecar already gives sfsmaster before it starts pgrep-checking it)
+	// as its InitialDelaySeconds, and a low FailureThreshold, because a
+	// failing liveness probe kills the container — restarting a master that
+	// is still legitimately loading a large metadata file would be
+	// counter-productive.
+	readinessProbe := &corev1.Probe{
+		ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt(int(probePort))}},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      3,
+		FailureThreshold:    6,
+	}
+	livenessProbe := &corev1.Probe{
+		ProbeHandler:        corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt(int(probePort))}},
+		InitialDelaySeconds: int32(startupGrace.Seconds()),
+		PeriodSeconds:       10,
+		TimeoutSeconds:      3,
+		FailureThreshold:    3,
+	}
 
 	// Resources: use master resources for all pods in the StatefulSet.
 	// Shadow resources (if different) would require per-ordinal overrides —
@@ -2347,6 +2562,13 @@ done
 			Command:         []string{"sh", "-c", sidecarCmd},
 			Env:             []corev1.EnvVar{podNameEnv},
 			Resources:       sidecarDefaultResources(),
+			// Read-only mount of the same PVC the main container uses for
+			// /var/lib/saunafs, so the shadow-acquisition staleness heuristic
+			// below can stat() the local changelog file. Read-only: the
+			// sidecar must never be able to write/corrupt master metadata.
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "master-data", MountPath: "/var/lib/saunafs", ReadOnly: true},
+			},
 		})
 	}
 
@@ -2429,7 +2651,20 @@ done
 					// master and all shadows simultaneously.  "Preferred" (weight 100)
 					// rather than "required" keeps single-node dev clusters working.
 					Affinity: masterPodAntiAffinity(stsName),
-					Volumes:  volumes,
+					// Belt-and-suspenders alongside the anti-affinity preference above:
+					// a topology spread constraint gives the scheduler an explicit
+					// skew budget across nodes. whenUnsatisfiable=ScheduleAnyway (not
+					// DoNotSchedule) so pods still schedule on small/single-node dev
+					// clusters (e.g. sfs-lima) instead of going Pending.
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       "kubernetes.io/hostname",
+							WhenUnsatisfiable: corev1.ScheduleAnyway,
+							LabelSelector:     &metav1.LabelSelector{MatchLabels: podLabels},
+						},
+					},
+					Volumes: volumes,
 					InitContainers: []corev1.Container{
 						{
 							Name:            "init-config",
@@ -2456,6 +2691,8 @@ done
 							Ports:           ports,
 							Resources:       resources,
 							VolumeMounts:    []corev1.VolumeMount{cfgMount, dataMount},
+							ReadinessProbe:  readinessProbe,
+							LivenessProbe:   livenessProbe,
 						},
 					}, sidecarContainers...),
 				},
@@ -2480,6 +2717,57 @@ done
 		return err
 	}
 	return r.createOrUpdateStatefulSet(ctx, desired)
+}
+
+// ── Master PodDisruptionBudget ───────────────────────────────────────────────
+
+// reconcileMasterPodDisruptionBudget maintains a PodDisruptionBudget covering
+// the master StatefulSet's pods, but only when shadow HA is configured.
+//
+// A PDB with minAvailable=1 only makes sense once there is more than one
+// replica to budget against. For a single, non-HA master (spec.shadow ==
+// nil, totalReplicas == 1) a minAvailable=1 PDB would require the one and
+// only pod to always stay Available, which blocks routine node draining
+// (kubectl drain, cluster autoscaler, k3s node upgrades on sfs-lima, etc.)
+// forever — the eviction can never satisfy the budget. So the PDB is only
+// created once a shadow exists to take over during a voluntary disruption,
+// and is deleted if Shadow is later removed (mirroring how reconcileMasterHA
+// deletes a stale Lease when Shadow == nil).
+func (r *LeilFSClusterReconciler) reconcileMasterPodDisruptionBudget(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
+	pdbName := fmt.Sprintf("%s-master", cluster.Name)
+
+	if cluster.Spec.Shadow == nil {
+		pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metav1.ObjectMeta{Name: pdbName, Namespace: cluster.Namespace}}
+		return client.IgnoreNotFound(r.Delete(ctx, pdb))
+	}
+
+	masterLabels := map[string]string{
+		"app.kubernetes.io/name":     "leilfs-master",
+		"app.kubernetes.io/instance": cluster.Name,
+	}
+	minAvailable := intstr.FromInt(1)
+
+	desired := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: pdbName, Namespace: cluster.Namespace},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			MinAvailable: &minAvailable,
+			Selector:     &metav1.LabelSelector{MatchLabels: masterLabels},
+		},
+	}
+	if err := ctrl.SetControllerReference(cluster, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &policyv1.PodDisruptionBudget{}
+	if err := r.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: cluster.Namespace}, existing); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+		return r.Create(ctx, desired)
+	}
+	existing.Spec.MinAvailable = desired.Spec.MinAvailable
+	existing.Spec.Selector = desired.Spec.Selector
+	return r.Update(ctx, existing)
 }
 
 // ── Master HA (Lease observer) ───────────────────────────────────────────────

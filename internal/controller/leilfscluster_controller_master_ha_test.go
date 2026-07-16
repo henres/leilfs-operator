@@ -46,6 +46,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -322,6 +323,178 @@ var _ = Describe("Master HA slice: reconcileMasterStatefulSet, reconcileMasterHA
 			for _, m := range master.VolumeMounts {
 				Expect(m.Name).NotTo(Equal("leilfs-goals"))
 			}
+		})
+
+		// ROADMAP.md P1 item 1: SFSMASTER_DEFAULT_GOAL was never actually
+		// injected into sfsmaster.cfg — only an informational ConfigMap
+		// snippet was written. init-config must now append the line itself.
+		It("injects SFSMASTER_DEFAULT_GOAL into init-config when a goal is marked Default", func() {
+			name := "ha-slice-sts-default-goal"
+			two := int32(2)
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Goals = []saunafsv1alpha1.GoalSpec{
+					{ID: 2, Name: "two_copies", Replication: &two},
+					{ID: 10, Name: "ec_4_2", EC: &saunafsv1alpha1.ECSpec{DataParts: 4, ParityParts: 2}, Default: true},
+				}
+			})
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			initConfig := masterHAFindContainer(sts.Spec.Template.Spec.InitContainers, "init-config")
+			Expect(initConfig).NotTo(BeNil())
+			Expect(initConfig.Command).To(HaveLen(3))
+			Expect(initConfig.Command[2]).To(ContainSubstring("SFSMASTER_DEFAULT_GOAL = ec_4_2"))
+		})
+
+		It("does not add an SFSMASTER_DEFAULT_GOAL line when no goal is marked Default", func() {
+			name := "ha-slice-sts-nodefault-goal"
+			two := int32(2)
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Goals = []saunafsv1alpha1.GoalSpec{{ID: 2, Name: "two_copies", Replication: &two}}
+			})
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			initConfig := masterHAFindContainer(sts.Spec.Template.Spec.InitContainers, "init-config")
+			Expect(initConfig).NotTo(BeNil())
+			Expect(initConfig.Command[2]).NotTo(ContainSubstring("SFSMASTER_DEFAULT_GOAL"))
+		})
+
+		// ROADMAP.md P1 item 2: the master container had no readiness/liveness
+		// probes, so traffic could reach a pod before sfsmaster finished
+		// loading metadata and started listening.
+		It("wires TCPSocket readiness and liveness probes on the master container against the client port", func() {
+			name := "ha-slice-sts-probes"
+			cluster := createCluster(name, nil)
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			master := masterHAFindContainer(sts.Spec.Template.Spec.Containers, "leilfs-master")
+			Expect(master.ReadinessProbe).NotTo(BeNil())
+			Expect(master.ReadinessProbe.TCPSocket).NotTo(BeNil())
+			Expect(master.ReadinessProbe.TCPSocket.Port.IntValue()).To(Equal(9421))
+			Expect(master.ReadinessProbe.FailureThreshold).To(BeNumerically(">", master.LivenessProbe.FailureThreshold),
+				"readiness should be more lenient than liveness so a slow metadata load doesn't get the container killed")
+
+			Expect(master.LivenessProbe).NotTo(BeNil())
+			Expect(master.LivenessProbe.TCPSocket).NotTo(BeNil())
+			Expect(master.LivenessProbe.TCPSocket.Port.IntValue()).To(Equal(9421))
+			// Default StartupGracePeriod is 30s; liveness reuses it as its
+			// InitialDelaySeconds so a legitimately slow metadata load can't
+			// trigger a liveness-kill before the probe even gets a fair look.
+			Expect(master.LivenessProbe.InitialDelaySeconds).To(Equal(int32(30)))
+		})
+
+		It("falls back to the admin port for probes when spec.master.ports overrides omit a client port", func() {
+			name := "ha-slice-sts-probes-override"
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Master.Ports = []saunafsv1alpha1.NamedPort{{Name: "admin", ContainerPort: 19419}}
+				c.Spec.Master.StartupGracePeriod = &metav1.Duration{Duration: 45 * time.Second}
+			})
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			master := masterHAFindContainer(sts.Spec.Template.Spec.Containers, "leilfs-master")
+			Expect(master.ReadinessProbe.TCPSocket.Port.IntValue()).To(Equal(19419))
+			Expect(master.LivenessProbe.TCPSocket.Port.IntValue()).To(Equal(19419))
+			Expect(master.LivenessProbe.InitialDelaySeconds).To(Equal(int32(45)),
+				"liveness InitialDelaySeconds should follow a custom spec.master.startupGracePeriod")
+		})
+
+		// ROADMAP.md P1 item 3: no topologySpreadConstraints existed to
+		// explicitly budget scheduling skew across nodes for master/shadow pods.
+		It("sets a ScheduleAnyway topologySpreadConstraint across hostnames matching the master pod labels", func() {
+			name := "ha-slice-sts-spread"
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Shadow = &saunafsv1alpha1.ShadowSpec{Replicas: int32Ptr(1)}
+			})
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			Expect(sts.Spec.Template.Spec.TopologySpreadConstraints).To(HaveLen(1))
+			tsc := sts.Spec.Template.Spec.TopologySpreadConstraints[0]
+			Expect(tsc.MaxSkew).To(Equal(int32(1)))
+			Expect(tsc.TopologyKey).To(Equal("kubernetes.io/hostname"))
+			Expect(tsc.WhenUnsatisfiable).To(Equal(corev1.ScheduleAnyway),
+				"must not block scheduling on small/single-node clusters like sfs-lima")
+			Expect(tsc.LabelSelector).NotTo(BeNil())
+			Expect(tsc.LabelSelector.MatchLabels).To(Equal(map[string]string{
+				"app.kubernetes.io/name":     "leilfs-master",
+				"app.kubernetes.io/instance": name,
+			}))
+		})
+
+		// ROADMAP.md P1 item 4: bounded staleness heuristic before a shadow
+		// attempts the Lease CAS acquisition. Real election timing/shell
+		// execution cannot run under envtest (no container runtime), so this
+		// asserts what the controller deterministically produces: the
+		// sidecar script contains the heuristic and the sidecar container can
+		// actually read the signal it depends on (master-data mounted
+		// read-only). See the KNOWN, DOCUMENTED GAP note atop this file and
+		// the extensive in-script comment for what this does and does not
+		// guarantee.
+		It("gives the ha-sidecar a read-only mount of master-data and embeds the changelog-staleness backoff before CAS acquisition", func() {
+			name := "ha-slice-sts-staleness"
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Shadow = &saunafsv1alpha1.ShadowSpec{Replicas: int32Ptr(1)}
+			})
+
+			Expect(newReconciler().reconcileMasterStatefulSet(ctx, cluster)).To(Succeed())
+
+			sts := &appsv1.StatefulSet{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, sts)
+			}).Should(Succeed())
+
+			sidecar := masterHAFindContainer(sts.Spec.Template.Spec.Containers, "ha-sidecar")
+			Expect(sidecar).NotTo(BeNil())
+
+			// The heuristic's signal (changelog.sfs mtime) lives on the same
+			// PVC the main container mounts; the sidecar must have read
+			// access, and only read access (it must never be able to write
+			// or corrupt master metadata).
+			Expect(sidecar.VolumeMounts).To(ContainElement(corev1.VolumeMount{
+				Name: "master-data", MountPath: "/var/lib/saunafs", ReadOnly: true,
+			}))
+
+			script := sidecar.Command[2]
+			Expect(script).To(ContainSubstring("changelog.sfs"), "must read the changelog mtime as the staleness signal")
+			Expect(script).To(ContainSubstring("STALE_DELAY"))
+			// Bounded: must cap the heuristic delay so it cannot become an
+			// unbounded/second failover timer on top of leaseDuration.
+			Expect(script).To(ContainSubstring("-gt 15"))
+			// Deterministic ordinal-jitter fallback for when no local
+			// changelog can be observed at all (e.g. very first bootstrap).
+			Expect(script).To(ContainSubstring("ORDINAL"))
+			// The heuristic must never bypass the atomic CAS: it only ever
+			// delays before the existing "Atomic CAS" block, which is
+			// unchanged and still the sole source of mutual exclusion.
+			Expect(script).To(ContainSubstring("Atomic CAS: PATCH only if resourceVersion matches"))
 		})
 	})
 
@@ -676,6 +849,75 @@ var _ = Describe("Master HA slice: reconcileMasterStatefulSet, reconcileMasterHA
 			final := &rbacv1.Role{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: roleName, Namespace: "default"}, final)).To(Succeed())
 			Expect(final.UID).To(Equal(firstUID), "expected an in-place Role update, not a recreation")
+		})
+	})
+
+	// ── reconcileMasterPodDisruptionBudget ───────────────────────────────────
+
+	Describe("reconcileMasterPodDisruptionBudget", func() {
+		It("creates nothing when shadow is not configured", func() {
+			name := "ha-slice-pdb-noshadow"
+			cluster := createCluster(name, nil)
+
+			Expect(newReconciler().reconcileMasterPodDisruptionBudget(ctx, cluster)).To(Succeed())
+
+			Consistently(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: name + "-master", Namespace: "default"}, &policyv1.PodDisruptionBudget{})
+				return apierrors.IsNotFound(err)
+			}, "300ms", "50ms").Should(BeTrue())
+		})
+
+		It("deletes a stale PodDisruptionBudget when shadow is removed", func() {
+			name := "ha-slice-pdb-stale"
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Shadow = &saunafsv1alpha1.ShadowSpec{Replicas: int32Ptr(1)}
+			})
+			r := newReconciler()
+
+			Expect(r.reconcileMasterPodDisruptionBudget(ctx, cluster)).To(Succeed())
+			pdbName := name + "-master"
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: "default"}, &policyv1.PodDisruptionBudget{})
+			}).Should(Succeed())
+
+			cluster.Spec.Shadow = nil
+			Expect(r.reconcileMasterPodDisruptionBudget(ctx, cluster)).To(Succeed())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: "default"}, &policyv1.PodDisruptionBudget{})
+				return apierrors.IsNotFound(err)
+			}).Should(BeTrue())
+		})
+
+		It("creates a minAvailable=1 PodDisruptionBudget scoped to the master pod labels when shadow is configured, and is idempotent", func() {
+			name := "ha-slice-pdb-shadow"
+			cluster := createCluster(name, func(c *saunafsv1alpha1.LeilFSCluster) {
+				c.Spec.Shadow = &saunafsv1alpha1.ShadowSpec{Replicas: int32Ptr(2)}
+			})
+			r := newReconciler()
+
+			Expect(r.reconcileMasterPodDisruptionBudget(ctx, cluster)).To(Succeed())
+
+			pdbName := name + "-master"
+			pdb := &policyv1.PodDisruptionBudget{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: "default"}, pdb)
+			}).Should(Succeed())
+
+			Expect(pdb.Spec.MinAvailable).NotTo(BeNil())
+			Expect(pdb.Spec.MinAvailable.IntValue()).To(Equal(1))
+			Expect(pdb.Spec.Selector).NotTo(BeNil())
+			Expect(pdb.Spec.Selector.MatchLabels).To(Equal(map[string]string{
+				"app.kubernetes.io/name":     "leilfs-master",
+				"app.kubernetes.io/instance": name,
+			}))
+			firstUID := pdb.UID
+
+			// Idempotent: re-reconciling must update in place, not recreate.
+			Expect(r.reconcileMasterPodDisruptionBudget(ctx, cluster)).To(Succeed())
+			again := &policyv1.PodDisruptionBudget{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: "default"}, again)).To(Succeed())
+			Expect(again.UID).To(Equal(firstUID), "expected an in-place update, not a recreation")
 		})
 	})
 })

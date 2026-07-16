@@ -1,0 +1,38 @@
+{{- if .Values.serviceMonitor.enabled }}
+# Scrapes the operator's own /metrics endpoint (exposed by the manager
+# container directly — this deployment does not run a kube-rbac-proxy
+# sidecar, see chart/templates/deployment.yaml and values.yaml's
+# metricsSecure flag).
+#
+# Mirrors config/prometheus/monitor.yaml (the kustomize equivalent),
+# adapted to this chart's actual metrics topology (see
+# hack/monitoring/servicemonitor.yaml, the manifest actually used
+# against the dev cluster) and parameterized with the chart's helpers.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "leilfs-operator.fullname" . }}-controller-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "leilfs-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+    {{- with .Values.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "leilfs-operator.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      {{- if .Values.metricsSecure }}
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+      {{- else }}
+      scheme: http
+      {{- end }}
+{{- end }}

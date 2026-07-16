@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "leilfs-operator.fullname" . }}-controller-manager-metrics-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "leilfs-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  ports:
+    - name: metrics
+      port: {{ .Values.metricsBindAddress | splitList ":" | last }}
+      protocol: TCP
+      targetPort: metrics
+  selector:
+    {{- include "leilfs-operator.selectorLabels" . | nindent 4 }}

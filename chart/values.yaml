@@ -72,3 +72,24 @@ tolerations: []
 
 # -- Affinity rules for the operator pod
 affinity: {}
+
+serviceMonitor:
+  # -- Create a ServiceMonitor for the operator's own /metrics endpoint.
+  # Requires the Prometheus Operator CRDs (e.g. kube-prometheus-stack) to be installed.
+  enabled: true
+  # -- Scrape interval
+  interval: 30s
+  # -- Additional labels merged onto the ServiceMonitor. Defaults to the
+  # `release: kube-prom-stack` label expected by kube-prometheus-stack's
+  # default serviceMonitorSelector; override to match your Prometheus release.
+  additionalLabels:
+    release: kube-prom-stack
+
+dashboards:
+  # -- Create a ConfigMap embedding the Grafana dashboards shipped with this
+  # chart (chart/dashboards, symlinked from hack/monitoring/dashboards).
+  # Requires the Grafana sidecar dashboard discovery (sidecar.dashboards.enabled
+  # in kube-prometheus-stack's grafana subchart).
+  enabled: true
+  # -- Additional labels merged onto the dashboards ConfigMap
+  additionalLabels: {}

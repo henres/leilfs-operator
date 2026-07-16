@@ -1,0 +1,23 @@
+{{- if .Values.dashboards.enabled }}
+# Wraps the Grafana dashboards from hack/monitoring/dashboards/*.json into a
+# ConfigMap, picked up by the Grafana sidecar (grafana_dashboard: "1").
+#
+# chart/dashboards is a symlink to ../hack/monitoring/dashboards so the
+# embedded JSON is read from that single source of truth at render time
+# (via .Files.Glob) instead of being copy-pasted — the dev-cluster script
+# hack/monitoring/sync-dashboards.sh and this template can never drift.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "leilfs-operator.fullname" . }}-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "leilfs-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboards
+    grafana_dashboard: "1"
+    {{- with .Values.dashboards.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  {{- (.Files.Glob "dashboards/*.json").AsConfig | nindent 2 }}
+{{- end }}

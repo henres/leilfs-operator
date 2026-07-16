@@ -620,5 +620,158 @@ var _ = Describe("Chunk server reconciliation", func() {
 			err := k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
+
+		// ── Orphan teardown (localdisk-operator.io/disk-state contract) ─────────
+		//
+		// localdisk-operator sets localdisk-operator.io/disk-state=Missing on a
+		// PV once the underlying physical disk is confirmed gone (past its
+		// debounce grace period) but never deletes a Bound PV itself — that's
+		// the producer-side safety invariant. It is this controller's job to
+		// tear down the chunkserver workload bound to such a PV so it can
+		// eventually transition to Released and be reaped on the producer
+		// side. A PV disappearing entirely is the other orphan trigger.
+
+		markDiskState := func(pv *corev1.PersistentVolume, state string) {
+			latest := &corev1.PersistentVolume{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pv.Name}, latest)).To(Succeed())
+			if latest.Labels == nil {
+				latest.Labels = map[string]string{}
+			}
+			latest.Labels["localdisk-operator.io/disk-state"] = state
+			Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+		}
+
+		// forceDeletePVC mirrors forceDeletePV above: the PVCs this suite
+		// creates via ensureAutoDiscoverPVC also get the built-in
+		// kubernetes.io/pvc-protection finalizer stamped on by the
+		// StorageObjectInUseProtection admission plugin, normally cleared by
+		// a controller envtest never runs. Registered as a DeferCleanup
+		// backstop so a torn-down (or never-torn-down, on assertion failure)
+		// PVC never leaks into later specs.
+		forceDeletePVC := func(name string) {
+			pvc := &corev1.PersistentVolumeClaim{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, pvc); err != nil {
+				return
+			}
+			_ = k8sClient.Delete(ctx, pvc)
+			latest := &corev1.PersistentVolumeClaim{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, latest); err == nil {
+				latest.Finalizers = nil
+				_ = k8sClient.Update(ctx, latest)
+			}
+		}
+
+		expectResourceSetGone := func(cluster *saunafsv1alpha1.LeilFSCluster, srvName string) {
+			pvcName := fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)
+			cmName := fmt.Sprintf("%s-chunk-%s-hdd", cluster.Name, srvName)
+
+			err := k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "StatefulSet should have been deleted")
+
+			err = k8sClient.Get(ctx, chunkKey(cluster, srvName), &corev1.Service{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Service should have been deleted")
+
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, &corev1.ConfigMap{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "ConfigMap should have been deleted")
+
+			// The PVC carries the same built-in kubernetes.io/pvc-protection
+			// finalizer as PVs carry kubernetes.io/pv-protection (see
+			// forceDeletePV's comment above) — added at creation by the
+			// StorageObjectInUseProtection admission plugin and normally
+			// cleared by a controller envtest never runs. Delete() therefore
+			// only sets a DeletionTimestamp here; accept that as proof the
+			// reconciler issued the delete, since full removal is something
+			// only a live cluster's pvc-protection controller can finish.
+			pvc := &corev1.PersistentVolumeClaim{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: cluster.Namespace}, pvc)
+			if err == nil {
+				Expect(pvc.DeletionTimestamp).NotTo(BeNil(), "PVC should have been marked for deletion")
+			} else {
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "PVC should have been deleted")
+			}
+		}
+
+		It("tears down StatefulSet+PVC+Service+ConfigMap once the PV's disk-state flips to Missing", func() {
+			pv := createPV("pv-missing-0001", "worker-8", map[string]string{"localdisk-operator.io/disk": "vdb"}, corev1.VolumeBound)
+			cluster := createCluster("ad-missing", autoDiscoverSpec())
+			r := newReconciler()
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			srvName := "ad-" + pv.Name[:8]
+			DeferCleanup(func() { forceDeletePVC(fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)) })
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+
+			markDiskState(pv, "Missing")
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			expectResourceSetGone(cluster, srvName)
+		})
+
+		It("tears down chunk server resources when the underlying PV disappears entirely", func() {
+			pv := createPV("pv-vanish-0001", "worker-9", map[string]string{"localdisk-operator.io/disk": "vdb"}, corev1.VolumeBound)
+			cluster := createCluster("ad-gone", autoDiscoverSpec())
+			r := newReconciler()
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			srvName := "ad-" + pv.Name[:8]
+			DeferCleanup(func() { forceDeletePVC(fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)) })
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+
+			forceDeletePV(pv)
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			expectResourceSetGone(cluster, srvName)
+		})
+
+		It("keeps resources for a PV whose disk-state is Ready (no regression on the nominal path)", func() {
+			pv := createPV("pv-ready-00001", "worker-10", map[string]string{"localdisk-operator.io/disk": "vdb", "localdisk-operator.io/disk-state": "Ready"}, corev1.VolumeBound)
+			cluster := createCluster("ad-ready", autoDiscoverSpec())
+
+			Expect(newReconciler().reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+
+			srvName := "ad-" + pv.Name[:8]
+			DeferCleanup(func() { forceDeletePVC(fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)) })
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+		})
+
+		It("does not tear down existing resources when autoDiscover is subsequently disabled", func() {
+			pv := createPV("pv-adisab-0001", "worker-11", map[string]string{"localdisk-operator.io/disk": "vdb"}, corev1.VolumeBound)
+			cluster := createCluster("ad-disable-after", autoDiscoverSpec())
+			r := newReconciler()
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			srvName := "ad-" + pv.Name[:8]
+			DeferCleanup(func() { forceDeletePVC(fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)) })
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+
+			markDiskState(pv, "Missing")
+			cluster.Spec.Chunk.AutoDiscover.Enabled = false
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+
+			// Teardown must never fire for a disabled cluster, matching the
+			// watch mapping's Enabled=true-only enqueue filter.
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+		})
+
+		It("is idempotent: sweeping an already-torn-down resource set does not error", func() {
+			pv := createPV("pv-idemp-0002", "worker-12", map[string]string{"localdisk-operator.io/disk": "vdb"}, corev1.VolumeBound)
+			cluster := createCluster("ad-sweep-idempotent", autoDiscoverSpec())
+			r := newReconciler()
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			srvName := "ad-" + pv.Name[:8]
+			DeferCleanup(func() { forceDeletePVC(fmt.Sprintf("%s-chunk-%s", cluster.Name, srvName)) })
+			Expect(k8sClient.Get(ctx, chunkKey(cluster, srvName), &appsv1.StatefulSet{})).To(Succeed())
+
+			markDiskState(pv, "Missing")
+
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			expectResourceSetGone(cluster, srvName)
+
+			// Second sweep over an already-torn-down set: no error.
+			Expect(r.reconcileAutoDiscoverChunkServers(ctx, cluster)).To(Succeed())
+			expectResourceSetGone(cluster, srvName)
+		})
 	})
 })

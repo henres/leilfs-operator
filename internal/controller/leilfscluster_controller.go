@@ -1123,10 +1123,33 @@ func buildChunkVolumes(srv *saunafsv1alpha1.ChunkServerSpec) ([]corev1.VolumeMou
 
 // ── Auto-Discover Chunk Servers from PVs ─────────────────────────────────────
 
+// localdiskDiskStateLabel and localdiskDiskStateMissing mirror a contract
+// owned by the sibling localdisk-operator repo: its LocalDiskReconciler
+// stamps every PV it manages with localdisk-operator.io/disk-state =
+// "Ready" | "Missing". "Missing" means the underlying physical disk is
+// confirmed gone (past a debounce grace period) but the PV itself has NOT
+// been deleted — localdisk-operator never deletes a Bound PV, that is its
+// producer-side safety invariant. This repo deliberately does not import
+// localdisk-operator's Go API (the two operators are decoupled by design),
+// so the label key is consumed here as a literal string, exactly like the
+// pre-existing "localdisk-operator.io/disk" ownership label elsewhere in
+// this file.
+const (
+	localdiskDiskStateLabel   = "localdisk-operator.io/disk-state"
+	localdiskDiskStateMissing = "Missing"
+)
+
 // reconcileAutoDiscoverChunkServers watches PVs matching the configured label
 // selector and creates one chunkserver StatefulSet per discovered PV. Each PV
 // gets a dedicated PVC and StatefulSet, mirroring the manual ChunkServerSpec
 // pattern but driven entirely by PV existence.
+//
+// It also tears down the StatefulSet+PVC+Service+ConfigMap set for any
+// previously auto-discovered PV that has become an orphan: either the PV
+// disappeared entirely, or localdisk-operator marked its disk-state
+// Missing. Tearing down releases the PVC's bind on the PV, which is what
+// lets the PV eventually transition to Released and get reaped on the
+// producer side — see sweepOrphanedAutoDiscoverResources.
 func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster) error {
 	ad := cluster.Spec.Chunk.AutoDiscover
 	if ad == nil || !ad.Enabled {
@@ -1150,6 +1173,15 @@ func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.
 	pvList := &corev1.PersistentVolumeList{}
 	if err := r.List(ctx, pvList); err != nil {
 		return fmt.Errorf("listing PVs: %w", err)
+	}
+
+	// Index by name so the orphan sweep below can look up the current state
+	// of the PV bound to any previously auto-discovered PVC without a
+	// second List call; a name absent from this map means the PV no longer
+	// exists at all.
+	pvByName := make(map[string]*corev1.PersistentVolume, len(pvList.Items))
+	for i := range pvList.Items {
+		pvByName[pvList.Items[i].Name] = &pvList.Items[i]
 	}
 
 	// Filter PVs that match the selector labels.
@@ -1178,6 +1210,15 @@ func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.
 		if pv.Status.Phase != corev1.VolumeAvailable && pv.Status.Phase != corev1.VolumeBound {
 			logger.Info("Auto-discover: PV not available/bound, skipping",
 				"pv", pv.Name, "phase", pv.Status.Phase)
+			continue
+		}
+
+		// A PV can stay Bound while its disk is confirmed gone: phase alone
+		// does not reflect disk health. Skip (re)creating resources here —
+		// don't fight the sweep below, which tears this PV's resource set
+		// down within the same reconcile.
+		if pv.Labels[localdiskDiskStateLabel] == localdiskDiskStateMissing {
+			logger.Info("Auto-discover: PV disk-state is Missing, skipping create (will be torn down)", "pv", pv.Name)
 			continue
 		}
 
@@ -1230,6 +1271,83 @@ func (r *LeilFSClusterReconciler) reconcileAutoDiscoverChunkServers(ctx context.
 		}
 	}
 
+	if err := r.sweepOrphanedAutoDiscoverResources(ctx, cluster, pvByName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// sweepOrphanedAutoDiscoverResources deletes the StatefulSet+Service+ConfigMap+PVC
+// set for any previously auto-discovered PV that is now an orphan: the PV
+// either no longer exists at all, or carries disk-state=Missing. It is a
+// separate pass from the create loop above (rather than being folded into
+// it) because an orphan is identified by walking this cluster's *existing*
+// auto-discover PVCs — including ones whose PV no longer matches ad's label
+// selector at all, e.g. because the PV is gone — which the create loop's
+// PV-first iteration cannot discover.
+//
+// Resources are matched by the same labels ensureAutoDiscoverPVC stamps on
+// every PVC it creates (leilfs.io/auto-discover=true, app.kubernetes.io/instance).
+// Deleting the PVC releases its bind on the PV, allowing the PV to
+// eventually transition to Released and be reaped on the localdisk-operator
+// side; deleting is idempotent via client.IgnoreNotFound, so re-running the
+// sweep against an already-torn-down set is a no-op.
+func (r *LeilFSClusterReconciler) sweepOrphanedAutoDiscoverResources(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, pvByName map[string]*corev1.PersistentVolume) error {
+	logger := log.FromContext(ctx)
+
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, pvcList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			"leilfs.io/auto-discover":    "true",
+			"app.kubernetes.io/instance": cluster.Name,
+		},
+	); err != nil {
+		return fmt.Errorf("listing auto-discover PVCs: %w", err)
+	}
+
+	for i := range pvcList.Items {
+		pvc := &pvcList.Items[i]
+
+		pv, pvExists := pvByName[pvc.Spec.VolumeName]
+		orphaned := !pvExists || pv.Labels[localdiskDiskStateLabel] == localdiskDiskStateMissing
+		if !orphaned {
+			continue
+		}
+
+		reason := "disk-state=Missing"
+		if !pvExists {
+			reason = "PV no longer exists"
+		}
+		logger.Info("Auto-discover: tearing down orphaned chunk server resources",
+			"pvc", pvc.Name, "pv", pvc.Spec.VolumeName, "reason", reason)
+
+		if err := r.deleteAutoDiscoverResourceSet(ctx, cluster, pvc.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteAutoDiscoverResourceSet deletes the StatefulSet, headless Service,
+// hdd ConfigMap, and PVC for one auto-discovered chunk server, given the
+// canonical resource name (which is also the PVC name, since
+// reconcileAutoDiscoverChunkServers derives the STS/Service/PVC names from
+// the same "<cluster>-chunk-<srvName>" pattern and the ConfigMap name from
+// that plus a "-hdd" suffix). Missing objects are not an error.
+func (r *LeilFSClusterReconciler) deleteAutoDiscoverResourceSet(ctx context.Context, cluster *saunafsv1alpha1.LeilFSCluster, name string) error {
+	objs := []client.Object{
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name + "-hdd", Namespace: cluster.Namespace}},
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}},
+	}
+	for _, obj := range objs {
+		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("deleting %T %s: %w", obj, name, err)
+		}
+	}
 	return nil
 }
 

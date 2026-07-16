@@ -8,7 +8,7 @@ NAME="${DASHBOARDS_CM_NAME:-leilfs-operator-dashboards}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASH_DIR="${SCRIPT_DIR}/dashboards"
 
-EXPECTED_CONTEXT="${KUBE_CONTEXT:-kind-leilfs-operator}"
+EXPECTED_CONTEXT="${KUBE_CONTEXT:-sfs-lima}"
 if ! kubectl config get-contexts -o name | grep -qx "${EXPECTED_CONTEXT}"; then
   echo "ERROR: kube context '${EXPECTED_CONTEXT}' not found." >&2
   exit 1

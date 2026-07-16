@@ -1,0 +1,25 @@
+# This patch add annotation to admission webhook config and
+# CERTIFICATE_NAMESPACE and CERTIFICATE_NAME will be substituted by kustomize
+#
+# NOTE: the stock kubebuilder scaffold also includes a matching
+# MutatingWebhookConfiguration document here, but this project only
+# registers a *validating* webhook for LeilFSCluster (see
+# api/v1alpha1/leilfscluster_webhook.go) — there is no
+# MutatingWebhookConfiguration resource for kustomize to patch, and leaving
+# that document in place makes `kustomize build config/default` fail with
+# "no matches for Id MutatingWebhookConfiguration...". Add it back (and the
+# matching MutatingWebhookConfiguration target in kustomization.yaml's
+# replacements block) if a defaulting webhook is introduced later.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    app.kubernetes.io/name: validatingwebhookconfiguration
+    app.kubernetes.io/instance: validating-webhook-configuration
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/created-by: leilfs-operator
+    app.kubernetes.io/part-of: leilfs-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: validating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME

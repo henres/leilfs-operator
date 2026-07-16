@@ -135,6 +135,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "LeilFSCluster")
 		os.Exit(1)
 	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = (&saunafsv1alpha1.LeilFSCluster{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "LeilFSCluster")
+			os.Exit(1)
+		}
+	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

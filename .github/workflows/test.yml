@@ -2,9 +2,7 @@ name: Test
 
 # NOTE: this repo's default (and only) branch is `master`, not `main` --
 # verified via `git remote show origin` / `git ls-remote --heads origin`.
-# Keep this trigger in sync with the actual default branch; do not copy
-# `main` from build-and-push.yml, whose `branches: main` filter currently
-# never matches any real push/PR here.
+# Keep this trigger in sync with the actual default branch.
 on:
   push:
     branches:

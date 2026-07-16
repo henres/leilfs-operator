@@ -1,0 +1,76 @@
+name: Test
+
+# NOTE: this repo's default (and only) branch is `master`, not `main` --
+# verified via `git remote show origin` / `git ls-remote --heads origin`.
+# Keep this trigger in sync with the actual default branch; do not copy
+# `main` from build-and-push.yml, whose `branches: main` filter currently
+# never matches any real push/PR here.
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Generated-code drift, unit tests, lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read Go version from go.mod
+        id: goversion
+        run: |
+          version="$(grep -m1 '^go ' go.mod | awk '{print $2}')"
+          echo "Using Go version from go.mod: ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.goversion.outputs.version }}
+          cache: true
+
+      # controller-gen, kustomize, setup-envtest, golangci-lint, and the
+      # envtest KUBEBUILDER_ASSETS (etcd/kube-apiserver/kubectl) are all
+      # downloaded by the Makefile into bin/ (gitignored), pinned to the
+      # exact versions declared there (KUSTOMIZE_VERSION,
+      # CONTROLLER_TOOLS_VERSION, ENVTEST_VERSION, GOLANGCI_LINT_VERSION,
+      # ENVTEST_K8S_VERSION). Cache that directory keyed on the Makefile's
+      # contents so a version bump automatically busts the cache, and CI
+      # never has to duplicate a tool version that could drift from local.
+      - name: Cache Makefile tool binaries (controller-gen, kustomize, setup-envtest, golangci-lint, envtest assets)
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-leilfs-operator-tools-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-leilfs-operator-tools-
+
+      # Generated-code drift check ("Generated code rule" in AGENTS.md):
+      # config/crd/bases/*.yaml, config/rbac/role.yaml, and
+      # zz_generated.deepcopy.go are committed generated artifacts. If
+      # someone edits kubebuilder annotations without regenerating, or
+      # hand-edits the generated files without updating annotations,
+      # `make manifests generate` re-run here will produce a diff and
+      # this step fails the build.
+      - name: Verify generated code is up to date (make manifests generate)
+        run: |
+          make manifests generate
+          if ! git diff --exit-code; then
+            echo "::error::Generated CRD YAML, RBAC YAML, and/or zz_generated.deepcopy.go are out of date. Run 'make manifests generate' locally and commit the resulting diff."
+            exit 1
+          fi
+
+      - name: Run unit tests (make test)
+        run: make test
+
+      - name: Run lint (make lint)
+        run: make lint
